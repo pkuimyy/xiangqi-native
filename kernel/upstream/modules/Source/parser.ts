@@ -1,0 +1,460 @@
+import { Chess, type Move } from "../../chess";
+import {
+  DEFAULT_FEN,
+  EVAL_REGEX,
+  getPgnVariantTag,
+  isMoveCheckmate,
+  type MoveTokenType,
+  parseMoveInGame,
+  PRIMARY_MOVE_TOKEN_TYPES,
+  SHAPE_PART_REGEX,
+} from "../../chess";
+import { type ChessNode, type NodeShape, type ParseWarning } from "../../types";
+import {
+  GLYPH_BY_SYMBOL,
+  nagToAnnotationKey,
+  pushAnnotation,
+} from "../../utils/annotation-glyphs";
+import { extractCommentMeta } from "../../utils/comment-meta";
+import {
+  ANNOTATION_PREFIX,
+  isAnnotationKey,
+  SHAPES_PREFIX,
+} from "../../utils/icon";
+import { GLYPH_DEFS, nagToGlyph } from "../../utils/winningChances";
+
+import { type Token, tokenize, type TokenType } from "./Tokenizer";
+
+export class PGNParser {
+  haveFEN: boolean = false;
+  tokens: Token[];
+  nodeMap: Map<string, ChessNode>;
+  currentIndex: number;
+  rootNode: ChessNode;
+  currentNode: ChessNode;
+  nodeId: number;
+  currentStep: number = 0;
+  tags: Map<string, string> = new Map();
+  chess: Chess;
+  private readonly skippedTokens: ParseWarning[] = [];
+  private parseAborted = false;
+
+  constructor(
+    input: string | Token[],
+    private readonly strict = false,
+  ) {
+    this.nodeMap = new Map<string, ChessNode>();
+    this.tokens = typeof input === "string" ? tokenize(input) : input;
+    this.currentIndex = 0;
+    this.nodeId = 1;
+
+    this.chess = new Chess(DEFAULT_FEN);
+
+    this.rootNode = {
+      id: `node-root`,
+      fen: DEFAULT_FEN,
+      move: null,
+      step: 0,
+      color: null,
+      parentID: null,
+      children: [],
+      comments: [],
+    };
+    this.nodeMap.set(this.rootNode.id, this.rootNode);
+    this.currentStep++;
+
+    this.currentNode = this.rootNode;
+
+    while (!this.match("eof") && !this.parseAborted) {
+      if (this.match("tag")) {
+        this.parseTag();
+      } else if (this.isMoveToken()) {
+        this.processMove(
+          this.consume().value,
+          this.tokens[this.currentIndex - 1].type as MoveTokenType,
+        );
+      } else if (this.match("left-paren")) {
+        this.parseVariation();
+      } else if (this.match("comment")) {
+        this.parseComment();
+      } else if (this.match("nag")) {
+        this.parseNag();
+      } else if (this.match("result")) {
+        this.parseResult();
+      } else if (this.match("unknown")) {
+        this.parseUnknown();
+      } else {
+        this.consume();
+      }
+    }
+
+    if (this.strict && this.nodeMap.size <= 1) {
+      throw new Error("PGN contains no legal moves");
+    }
+
+    // A [Result] header without a movetext terminator (lichess studies,
+    // hand-written PGNs): carry the header result onto the mainline tip
+    // so the move list and result toolbar reflect it. An explicit
+    // movetext result token (set while parsing above) always wins.
+    const headerResult = this.tags.get("Result");
+    if (
+      headerResult === "1-0" ||
+      headerResult === "0-1" ||
+      headerResult === "1/2-1/2"
+    ) {
+      let tip = this.rootNode;
+      while (tip.children.length > 0) tip = tip.children[0];
+      tip.result ??= headerResult;
+    }
+  }
+
+  parseUnknown() {
+    const first = this.peek();
+    let text = "";
+    let endLine = first.line;
+    let endColumn = first.column;
+    // Merge only source-contiguous unknown tokens (no whitespace between).
+    while (this.match("unknown")) {
+      const tok = this.peek();
+      if (text && (tok.line !== endLine || tok.column !== endColumn)) break;
+      text += tok.value;
+      endLine = tok.line;
+      endColumn = tok.column + tok.value.length;
+      this.consume();
+    }
+    if (this.strict) throw new Error(`Unrecognized content: ${text}`);
+    this.skippedTokens.push({
+      text,
+      line: first.line,
+      column: first.column,
+      kind: "unknown",
+    });
+    this.parseAborted = true;
+  }
+
+  isMoveToken(): boolean {
+    const type = this.peek().type;
+    return (PRIMARY_MOVE_TOKEN_TYPES as readonly string[]).includes(type);
+  }
+
+  parseTag() {
+    const token = this.consume();
+    const tagText = token.value;
+
+    const match = tagText.match(/^\[(\w+)\s+"([^"]*)"\]$/);
+    if (!match) return;
+
+    const [, tagName, tagValue] = match;
+    this.tags.set(tagName, tagValue);
+
+    if (tagName.toUpperCase() === "FEN") {
+      try {
+        this.chess.load(tagValue);
+        this.rootNode.fen = tagValue;
+        this.haveFEN = true;
+      } catch {
+        if (this.strict) throw new Error(`Invalid FEN tag: ${tagValue}`);
+        this.skippedTokens.push({
+          text: `[FEN "${tagValue}"]`,
+          line: token.line,
+          column: token.column,
+          kind: "fen",
+        });
+        this.parseAborted = true;
+      }
+    }
+  }
+
+  createNode(move: Move, fen: string): ChessNode {
+    const color = move.color === "w" ? "white" : "black";
+    const node: ChessNode = {
+      id: `node-${this.nodeId++}`,
+      fen,
+      move,
+      step: this.currentStep,
+      color,
+      parentID: this.currentNode.id,
+      children: [],
+      comments: [],
+      isCheckmate: isMoveCheckmate(move),
+    };
+    this.nodeMap.set(node.id, node);
+    return node;
+  }
+
+  peek(): Token {
+    return this.tokens[this.currentIndex];
+  }
+
+  consume(): Token {
+    return this.tokens[this.currentIndex++];
+  }
+
+  match(type: TokenType): boolean {
+    return this.peek().type === type;
+  }
+
+  processMove(token: string, tokenType: MoveTokenType) {
+    const tok = this.tokens[this.currentIndex - 1];
+    const fen = this.currentNode.fen;
+    this.chess.load(fen);
+    try {
+      const move = parseMoveInGame(this.chess, token, tokenType);
+      if (!move) {
+        if (this.strict) throw new Error(`Invalid move: ${token}`);
+        this.skippedTokens.push({
+          text: token,
+          line: tok.line,
+          column: tok.column,
+          kind: "move",
+        });
+        this.parseAborted = true;
+        return;
+      }
+
+      const newNode = this.createNode(move, this.chess.fen());
+      this.currentNode.children.push(newNode);
+      this.currentNode = newNode;
+      this.currentStep++;
+    } catch (e) {
+      if (this.strict) throw e;
+      this.skippedTokens.push({
+        text: token,
+        line: tok.line,
+        column: tok.column,
+        kind: "move",
+      });
+      this.parseAborted = true;
+    }
+  }
+
+  parseVariation() {
+    this.consume();
+
+    const variationParentID = this.currentNode.parentID;
+    if (!variationParentID) {
+      while (
+        !this.match("right-paren") &&
+        !this.match("eof") &&
+        !this.parseAborted
+      ) {
+        this.consume();
+      }
+      if (this.match("right-paren")) this.consume();
+      return;
+    }
+    const variationBase = this.nodeMap.get(variationParentID)!;
+    const prevState = {
+      node: this.currentNode,
+      step: this.currentStep,
+    };
+
+    this.currentNode = variationBase;
+    this.currentStep = variationBase.step!;
+
+    while (
+      !this.match("right-paren") &&
+      !this.match("eof") &&
+      !this.parseAborted
+    ) {
+      if (this.isMoveToken()) {
+        this.processMove(
+          this.consume().value,
+          this.tokens[this.currentIndex - 1].type as MoveTokenType,
+        );
+      } else if (this.match("comment")) {
+        this.parseComment();
+      } else if (this.match("nag")) {
+        this.parseNag();
+      } else if (this.match("left-paren")) {
+        this.parseVariation();
+      } else if (this.match("result")) {
+        const token = this.consume();
+        const validResults = ["1-0", "0-1", "1/2-1/2"];
+        if (validResults.includes(token.value)) {
+          this.currentNode.result = token.value;
+        }
+        break;
+      } else if (this.match("unknown")) {
+        this.parseUnknown();
+      } else {
+        this.consume();
+      }
+    }
+
+    if (this.match("right-paren")) {
+      this.consume();
+    }
+
+    this.currentNode = prevState.node;
+    this.currentStep = prevState.step;
+  }
+
+  parseComment() {
+    const token = this.consume();
+    const raw = token.value.replace(/^{|}$/g, "").replace(/^;/, "").trim();
+
+    const evalMatch = raw.match(EVAL_REGEX);
+    if (evalMatch) {
+      const evalStr = evalMatch[1];
+      const bestmove = evalMatch[2] || undefined;
+      const ponder = evalMatch[3] || undefined;
+      const glyphSymbol = evalMatch[4] || undefined;
+      let scoreType: "cp" | "mate" = "cp";
+      let score: number;
+      if (evalStr.startsWith("m")) {
+        scoreType = "mate";
+        const mateStr = evalStr.slice(1);
+        const isNeg = mateStr.startsWith("-");
+        const mateVal = Number.parseInt(mateStr.replace(/[^0-9]/g, ""));
+        score = isNeg ? -mateVal : mateVal;
+      } else {
+        score = Math.round(Number.parseFloat(evalStr) * 100);
+      }
+      this.currentNode.eval = { score, scoreType, depth: 0, bestmove, ponder };
+      if (glyphSymbol) {
+        const glyphDef = GLYPH_DEFS[glyphSymbol];
+        if (glyphDef) this.currentNode.glyph = glyphDef;
+      }
+      return;
+    }
+
+    // Private annotation comment. Plain form: {#a:bm} (custom keys and
+    // the legacy +,-,= marks). The "comment" save format wraps the prefix
+    // in brackets with a catalog symbol: {[#a:!?]} for the move glyph,
+    // {[#a:±]} for study annotations.
+    let annotPayload: string | null = null;
+    if (raw.startsWith(`[${ANNOTATION_PREFIX}`) && raw.endsWith("]")) {
+      annotPayload = raw.slice(ANNOTATION_PREFIX.length + 1, -1);
+    } else if (raw.startsWith(ANNOTATION_PREFIX)) {
+      annotPayload = raw.slice(ANNOTATION_PREFIX.length);
+    }
+    if (annotPayload !== null) {
+      if (isAnnotationKey(annotPayload)) {
+        pushAnnotation(this.currentNode, annotPayload);
+        return;
+      }
+      const glyphDef = GLYPH_BY_SYMBOL[annotPayload];
+      if (glyphDef) {
+        if (glyphDef.category === "move") {
+          this.currentNode.glyph = GLYPH_DEFS[glyphDef.symbol];
+        } else {
+          pushAnnotation(this.currentNode, glyphDef.key);
+        }
+        return;
+      }
+    }
+
+    if (raw.startsWith(SHAPES_PREFIX)) {
+      const shapesStr = raw.slice(SHAPES_PREFIX.length);
+      const shapes: NodeShape[] = [];
+      for (const part of shapesStr.split(",")) {
+        const m = part.match(SHAPE_PART_REGEX);
+        if (m) shapes.push({ orig: m[1], dest: m[2], brush: m[3] });
+      }
+      if (shapes.length > 0) {
+        this.currentNode.shapes = shapes;
+        return;
+      }
+    }
+
+    const {
+      shapes,
+      eval: evalMeta,
+      clock,
+      annotator,
+      text,
+    } = extractCommentMeta(raw);
+    if (shapes.length > 0) {
+      // Lichess shapes accumulate across comment blocks (lila: shapes ++ s).
+      (this.currentNode.shapes ??= []).push(...shapes);
+    }
+    if (evalMeta) {
+      // Lichess [%eval]; later blocks win (same rule as %e: comments).
+      this.currentNode.eval = { ...evalMeta, depth: 0 };
+    }
+    if (clock) {
+      // Lichess [%clk]; later blocks win (same rule as %e: comments).
+      this.currentNode.clock = clock;
+    }
+    if (text) {
+      this.currentNode.comments ??= [];
+      this.currentNode.comments.push(text);
+      if (annotator) {
+        // [%anno] belongs to THIS comment block; align by comments index.
+        (this.currentNode.commentAuthors ??= [])[
+          this.currentNode.comments.length - 1
+        ] = annotator;
+      }
+    }
+  }
+
+  parseNag() {
+    const token = this.consume();
+    // A NAG annotates the move that was just played; NAGs before any move
+    // are legal PGN but have no target node, so they are dropped.
+    if (!this.currentNode.move) return;
+    const glyphDef = nagToGlyph(token.value);
+    if (glyphDef) {
+      this.currentNode.glyph ??= glyphDef;
+      return;
+    }
+    const annotationKey = nagToAnnotationKey(token.value);
+    if (annotationKey) {
+      pushAnnotation(this.currentNode, annotationKey);
+    }
+  }
+
+  parseResult() {
+    const token = this.consume();
+    const validResults = ["1-0", "0-1", "1/2-1/2", "*"];
+    if (validResults.includes(token.value)) {
+      if (token.value !== "*") {
+        this.currentNode.result = token.value;
+      }
+      this.tags.set("Result", token.value);
+    }
+  }
+
+  public getTags(): string {
+    const lines: string[] = [];
+    for (const [key, value] of this.tags.entries()) {
+      lines.push(`[${key} "${value}"]`);
+    }
+    const fenIndex = lines.findIndex((line) => /^\[FEN "/.test(line));
+    // A non-default start position pairs [FEN] with [SetUp "1"]
+    // (lichess export style).
+    if (fenIndex !== -1 && !lines.some((line) => /^\[SetUp "/.test(line))) {
+      lines.splice(fenIndex + 1, 0, `[SetUp "1"]`);
+    }
+    // Chess960 start positions carry [Variant "Chess960"] right before
+    // [FEN] unless the source already declares a variant.
+    if (
+      fenIndex !== -1 &&
+      !lines.some((line) => /^\[Variant "/.test(line)) &&
+      getPgnVariantTag(this.rootNode.fen)
+    ) {
+      lines.splice(fenIndex, 0, `[Variant "Chess960"]`);
+    }
+    return lines.join("\n");
+  }
+  public getRoot(): ChessNode {
+    return this.rootNode;
+  }
+  public getMap(): Map<string, ChessNode> {
+    return this.nodeMap;
+  }
+  public getSkipped(): ParseWarning[] {
+    return this.skippedTokens;
+  }
+  public getMainLine(): ChessNode[] {
+    const mainLine: ChessNode[] = [];
+    let current = this.rootNode;
+    while (current.children.length > 0) {
+      const mainChild = current.children[0];
+      mainLine.push(mainChild);
+      current = mainChild;
+    }
+    return mainLine;
+  }
+}

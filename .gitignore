@@ -1,0 +1,7 @@
+/build/
+/.packages/
+/.vs/
+/node_modules/
+/kernel/generated/*.log
+*.user
+*.suo

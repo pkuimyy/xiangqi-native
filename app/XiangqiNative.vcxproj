@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+ <ItemGroup Label="ProjectConfigurations">
+  <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+ </ItemGroup>
+ <PropertyGroup Label="Globals">
+  <ProjectGuid>{296B5594-687E-44BA-A358-2A6A74B121F0}</ProjectGuid>
+  <RootNamespace>XiangqiNative</RootNamespace><ProjectName>XiangqiNative</ProjectName>
+  <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion><TargetPlatformVersion>10.0.26100.0</TargetPlatformVersion><TargetPlatformIdentifier>Windows</TargetPlatformIdentifier>
+  <WindowsTargetPlatformMinVersion>10.0.22000.0</WindowsTargetPlatformMinVersion>
+  <UseWinUI>true</UseWinUI><AppContainerApplication>false</AppContainerApplication>
+  <Keyword>Win32Proj</Keyword>
+  <WindowsPackageType>None</WindowsPackageType><AppxPackage>false</AppxPackage>
+  <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+  <CppWinRTOptimized>true</CppWinRTOptimized><CppWinRTGenerateWindowsMetadata>false</CppWinRTGenerateWindowsMetadata>
+  <RestoreProjectStyle>PackageReference</RestoreProjectStyle><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  <RestorePackagesPath>$(MSBuildThisFileDirectory)..\.packages\nuget</RestorePackagesPath>
+  <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)..\build\winui\obj\</BaseIntermediateOutputPath>
+  <NuGetTargetMoniker>native,Version=v0.0</NuGetTargetMoniker>
+  <DefaultLanguage>zh-CN</DefaultLanguage>
+ </PropertyGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+ <PropertyGroup Label="Configuration">
+  <ConfigurationType>Application</ConfigurationType><PlatformToolset>v145</PlatformToolset>
+  <PlatformToolset Condition="'$(VisualStudioVersion)'=='17.0'">v143</PlatformToolset>
+  <CharacterSet>Unicode</CharacterSet>
+  <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+  <UseDebugLibraries Condition="'$(Configuration)'!='Debug'">false</UseDebugLibraries>
+ </PropertyGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+ <PropertyGroup>
+  <OutDir>$(MSBuildThisFileDirectory)..\build\winui\$(Configuration)\</OutDir>
+  <IntDir>$(MSBuildThisFileDirectory)..\build\winui\obj\$(Configuration)\</IntDir>
+  <TargetName>XiangqiNative</TargetName><AppxPriInitialPath></AppxPriInitialPath>
+ </PropertyGroup>
+ <ItemGroup>
+  <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260803003" />
+  <PackageReference Include="Microsoft.Windows.CppWinRT" Version="2.0.250303.1" />
+ </ItemGroup>
+ <ItemDefinitionGroup>
+  <ClCompile>
+   <LanguageStandard>stdcpp20</LanguageStandard><PrecompiledHeader>NotUsing</PrecompiledHeader>
+   <AdditionalOptions>/utf-8 /bigobj /permissive- %(AdditionalOptions)</AdditionalOptions>
+   <PreprocessorDefinitions>NOMINMAX;WIN32_LEAN_AND_MEAN;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+   <AdditionalIncludeDirectories>$(ProjectDir)..\include;$(ProjectDir)..\external\json;$(ProjectDir)..\external\oxqf\src\core\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+   <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary>
+   <RuntimeLibrary Condition="'$(Configuration)'!='Debug'">MultiThreaded</RuntimeLibrary>
+  </ClCompile>
+  <Link>
+   <SubSystem>Windows</SubSystem><GenerateWindowsMetadata>false</GenerateWindowsMetadata>
+   <AdditionalDependencies>$(ProjectDir)..\build\native\$(Configuration)\xiangqi_core.lib;$(ProjectDir)..\build\native\external\quickjs\$(Configuration)\qjs.lib;$(ProjectDir)..\build\native\external\oxqf\src\core\$(Configuration)\oxq-core.lib;$(ProjectDir)..\build\native\external\oxqf\src\convert\$(Configuration)\oxq-convert.lib;windowsapp.lib;comdlg32.lib;ole32.lib;shell32.lib;shlwapi.lib;bcrypt.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+  </Link>
+  <Manifest><AdditionalManifestFiles>app.manifest</AdditionalManifestFiles></Manifest>
+ </ItemDefinitionGroup>
+ <ItemGroup><ClCompile Include="main.cpp" /><Reference Include="$(ProjectDir)..\.packages\nuget\microsoft.web.webview2\1.0.3179.45\lib\Microsoft.Web.WebView2.Core.winmd" /></ItemGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

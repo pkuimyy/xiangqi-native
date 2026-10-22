@@ -1,0 +1,18 @@
+{
+  "name": "xiangqi-native-build",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0",
+  "scripts": {
+    "kernel:build": "node scripts/build-kernel.mjs",
+    "kernel:test": "node --test tests/kernel.test.mjs",
+    "upstream:test": "vitest run --config vitest.config.mjs"
+  },
+  "devDependencies": {
+    "clang-format": "1.8.0",
+    "esbuild": "0.28.2",
+    "prettier": "3.6.2",
+    "vitest": "5.0.5"
+  }
+}

@@ -1,0 +1,1 @@
+export const Chessground = undefined;

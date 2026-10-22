@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.ts text eol=lf
+*.mjs text eol=lf
+*.ps1 text eol=lf
+kernel/generated/* linguist-generated=true
+external/oxqf/** linguist-vendored=true
+external/json/** linguist-vendored=true
+reference/** linguist-vendored=true
