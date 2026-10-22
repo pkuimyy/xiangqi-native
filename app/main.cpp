@@ -20,6 +20,7 @@
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Markup.h>
+#include <winrt/Microsoft.UI.Xaml.Media.Animation.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
@@ -166,6 +167,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     Window window;
     Grid root;
     Canvas board;
+    ControlTemplate squareTemplate{nullptr};
     Grid evaluationStrip;
     bool bamboo = false;
     Canvas graph;
@@ -269,6 +271,21 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         }
     }
     void initialize() {
+        squareTemplate = Markup::XamlReader::Load(LR"XAML(
+<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 TargetType="Button">
+  <ContentPresenter Content="{TemplateBinding Content}"
+                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                    Padding="{TemplateBinding Padding}"
+                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{TemplateBinding CornerRadius}" />
+</ControlTemplate>)XAML")
+                             .as<ControlTemplate>();
+
         load_piece_art();
         docs.emplace_back(kernel);
         paths.emplace_back();
@@ -380,6 +397,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         });
         boardHeader.Children().Append(texture);
         leftPanel.Children().Append(boardHeader);
+        board.ChildrenTransitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
         board.Width(450);
         board.Height(500);
         board.Background(brush(245, 246, 248));
@@ -776,9 +794,8 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                 if (m.at("from") == selected)
                     destinations.insert(m.at("to").get<int>());
         auto &current = doc().node(doc().current());
-        int lastFrom = -1, lastTo = -1;
+        int lastTo = -1;
         if (!current.at("move").is_null()) {
-            lastFrom = current["move"]["from"];
             lastTo = current["move"]["to"];
         }
         std::array<char, 90> squares{};
@@ -798,6 +815,10 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         for (int s = 0; s < 90; s++) {
             auto p = point(s);
             Button b;
+            b.Template(squareTemplate);
+            b.UseSystemFocusVisuals(true);
+            b.Transitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
+            b.ContentTransitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
             b.Width(48);
             b.Height(48);
             b.Padding(Thickness{0});
@@ -806,14 +827,13 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             b.BorderThickness(Thickness{0});
             b.HorizontalContentAlignment(HorizontalAlignment::Center);
             b.VerticalContentAlignment(VerticalAlignment::Center);
-            if (s == lastFrom || s == lastTo) {
-                b.Background(SolidColorBrush(Color{80, 192, 132, 252}));
-                b.BorderBrush(brush(172, 100, 225));
+            if (s == lastTo) {
+                b.BorderBrush(brush(126, 111, 161));
                 b.BorderThickness(Thickness{1.5});
             }
             if (s == selected) {
-                b.BorderBrush(brush(34, 211, 238));
-                b.BorderThickness(Thickness{2.5});
+                b.BorderBrush(brush(38, 124, 113));
+                b.BorderThickness(Thickness{2});
             }
             if (squares[s])
                 b.Content(piece_visual(squares[s]));

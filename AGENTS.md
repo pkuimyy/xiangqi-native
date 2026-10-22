@@ -9,7 +9,7 @@ Independent Windows application. The user requires WinUI 3 native controls, C++ 
 - src/core/pgn.cpp: native PGN parser/stringifier and original comment metadata conventions.
 - src/core/layout.cpp: C++ port of the original Walker/Buchheim layout.
 - Document owns the authoritative OXQF GameModel; derived FEN/notation/layout are projections.
-- external/oxqf/: vendored source at 7d8a554, MIT.
+- OXQF: FetchContent from https://github.com/pkuimyy/OXQF.git at 206f807f8083ae0ec9384499a35313cb97c7a199, MIT. Link upstream OXQF::format and OXQF::convert. Do not vendor or patch its source.
 - external/json/: nlohmann/json 3.12.0, MIT.
 - assets/: plain native board by default, optional original bamboo board, and user-provided OXDF-editor SVG pieces. Load the original SVG paths through WinUI SvgImageSource; do not redraw glyphs using fonts. Wood resources are intentionally removed.
 - licenses/ and docs/DEPENDENCIES.md: retain source attribution.
@@ -18,6 +18,8 @@ Independent Windows application. The user requires WinUI 3 native controls, C++ 
 
 Use PowerShell scripts/build.ps1 -Configuration Debug or Release; -CoreOnly skips WinUI.
 Build/smoke scripts accept -OutputDirectory for independent review builds when the existing exe is running. Preserve the running window; do not terminate it to release an output lock.
+CMake generates build/native/winui/<Configuration>/NativeCore.props for the WinUI project. Never hardcode FetchContent header/library cache paths. Dependency BUILD_TESTING is OFF, so no upstream Node tooling is required.
+Board square buttons intentionally use a static native template with empty transitions. Moves update immediately, with only a thin destination outline and no origin fill or fade.
 All tests are native C++ and run through CTest. Do not introduce Node or JavaScript build steps.
 tests/fixtures/upstream-oracle.json records the original implementation before its removal. Do not rewrite expected output to conceal a regression.
 The legacy checkmate flag means no legal moves, including stalemate. The UI distinguishes the two using check.

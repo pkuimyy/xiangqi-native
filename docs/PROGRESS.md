@@ -11,7 +11,7 @@ Date: 2026-10-23. The current checkpoint implements the user's C++-only requirem
 - Native vector pieces, board click-to-move/flip, legal dots, last-move highlights, annotations and best-move arrows.
 - WinUI native texture selector, side toolbar, FEN copy, evaluation strip, compact branch graph and two-column Chinese move list.
 - Multiple games; navigation, branch deletion/promotion, comments, undo/redo.
-- OXQF authoritative model; rich metadata and original unknown annotations preserved.
+- OXQF authoritative model, fetched directly at 206f807 from pkuimyy/OXQF; rich metadata and unknown annotations preserved.
 - PGN import/export; Unicode paths, native file dialogs and atomic OXQ overwrite.
 - Native UCI analysis with cancellation, timeout, stale-result protection and Red-view scores.
 - Automatic discovery of pinned optional Pikafish and NNUE.
@@ -35,7 +35,13 @@ Release and Debug builds each passed all four CTest targets and actual WinUI smo
 
 ## Latest visual update
 
-The user requested removal of wood artwork and selected OXDF-editor/assets/pieces. All 14 SVGs now load directly through WinUI; their source hashes match. The default board is flat, with bamboo retained as an option. Release and Debug UI builds and smoke tests passed with all 14 SVG decode events confirmed; the four native CTest targets also passed in Release. The review executable is build/winui/Release-oxdf/XiangqiNative.exe because the existing Release exe was running. Build/smoke scripts now accept an independent OutputDirectory.
+The user requested removal of wood artwork and selected OXDF-editor/assets/pieces. All 14 SVGs now load directly through WinUI; their source hashes match. The default board is flat, with bamboo retained as an option. Release and Debug UI builds and smoke tests passed with all 14 SVG decode events confirmed; the four native CTest targets also passed in Release. The review executable is build/winui/Release-fetchcontent/XiangqiNative.exe because the existing Release exe was running. Build/smoke scripts now accept an independent OutputDirectory.
+
+## Latest dependency and motion update
+
+The local OXQF source copy is removed. FetchContent now obtains the pinned public repository and uses its original CMake targets. Generated NativeCore.props connects WinUI to the actual headers, libraries and MIT license. Release and Debug each passed all four native CTest targets and actual window smoke tests against the fetched commit. The new reader also successfully loaded a seven-node OXQ saved by the previous application build.
+
+Chess moves now update immediately with a thin destination outline. The previous translucent origin/destination fill and default square-button transitions are removed. The custom native button template retains keyboard focus and click/automation behavior.
 
 ## Next work
 

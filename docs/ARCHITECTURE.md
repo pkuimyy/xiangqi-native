@@ -12,13 +12,19 @@ Chinese input is resolved against generated legal moves. This also fixes the old
 
 Document owns the authoritative OXQF GameModel. FEN, notation and coordinates are derived caches. Undo/redo holds up to 100 model snapshots. Document operations and full tree projections currently run on the UI thread.
 
+## Upstream OXQF dependency
+
+CMake FetchContent obtains https://github.com/pkuimyy/OXQF.git at 206f807f8083ae0ec9384499a35313cb97c7a199. It configures the unmodified upstream project with dependency tests disabled; no Node tooling is needed by this application. The app links upstream OXQF::format and OXQF::convert. Existing oxq/core include compatibility is provided by upstream.
+
+CMake generates per-configuration NativeCore.props with target-derived headers, static libraries and license paths. WinUI imports these properties instead of assuming a source folder or library filename. The fetched source/build cache is under build/native/_deps and is not committed.
+
 ## Native visuals
 
 The default board uses a flat native brush and neutral SVG grid. Wood artwork is removed. Optional bamboo.jpg remains an unchanged complete board image, with calibrated native piece coordinates and no duplicate grid overlay.
 
 The 14 OXDF-editor SVG pieces are copied unchanged from the user's selected directory. Their glyphs are paths, so WinUI SvgImageSource renders them directly instead of reconstructing circles/text. A clipped native Canvas crops transparent outer margins from the 96x96 documents. Native load events verify all 14 resources decode successfully in the UI smoke test. Missing resource files fail startup explicitly.
 
-Native Button controls supply focus, input and accessibility names; the compact branch tree and two-column move list also use Buttons. Viewbox scales the board; evaluation-strip proportions reflect the original winning-chance mapping. There is no HTML/CSS layout.
+Chess-square Button controls use a static ContentPresenter template with empty control/content/children transitions. Position updates are immediate. Only the last destination has a thin outline; there is no origin fill, tween, fade or hover/press backdrop. System keyboard focus visuals are retained. Native Button controls supply focus, input and accessibility names; the compact branch tree and two-column move list also use Buttons. Viewbox scales the board; evaluation-strip proportions reflect the original winning-chance mapping. There is no HTML/CSS layout.
 
 ## Persistent metadata
 
