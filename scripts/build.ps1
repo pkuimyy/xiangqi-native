@@ -1,4 +1,4 @@
-param([ValidateSet('Debug','Release')][string]$Configuration='Debug',[switch]$CoreOnly)
+param([ValidateSet('Debug','Release')][string]$Configuration='Debug',[switch]$CoreOnly,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $repoPath=Split-Path -Parent $PSScriptRoot
 $programFilesX86=[Environment]::GetFolderPath('ProgramFilesX86')
@@ -24,7 +24,12 @@ try{
  if($LASTEXITCODE -ne 0){throw 'Native tests failed'}
  if(-not $CoreOnly){
   $msbuild=Join-Path $vsRoot 'MSBuild\Current\Bin\MSBuild.exe'
-  & $msbuild app/XiangqiNative.vcxproj /restore /m /v:minimal "/p:Configuration=$Configuration" /p:Platform=x64 /p:RestoreLockedMode=true
+  $buildArgs=@('app/XiangqiNative.vcxproj','/restore','/m','/v:minimal',"/p:Configuration=$Configuration",'/p:Platform=x64','/p:RestoreLockedMode=true')
+  if($OutputDirectory){
+   $outputPath=if([IO.Path]::IsPathRooted($OutputDirectory)){$OutputDirectory}else{Join-Path $repoPath $OutputDirectory}
+   $buildArgs+=('/p:OutDir='+[IO.Path]::GetFullPath($outputPath)+[IO.Path]::DirectorySeparatorChar)
+  }
+  & $msbuild @buildArgs
   if($LASTEXITCODE -ne 0){throw 'WinUI build failed'}
  }
 }finally{Pop-Location}

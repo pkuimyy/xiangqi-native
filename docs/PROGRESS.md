@@ -7,7 +7,7 @@ Date: 2026-10-23. The current checkpoint implements the user's C++-only requirem
 - Independent Git repository and WinUI 3/C++20 application.
 - Native C++ rules/FEN, Chinese/WXF/ICCS notation, PGN/comment metadata and Walker layout.
 - QuickJS, JS/TS sources, generated bundles, npm manifests and Node CI steps removed.
-- Original wood/bamboo textures, 14 traditional piece SVG definitions and board paths.
+- Flat native board by default, optional bamboo board, and 14 unchanged OXDF-editor SVG pieces. Wood and old traditional piece assets are removed.
 - Native vector pieces, board click-to-move/flip, legal dots, last-move highlights, annotations and best-move arrows.
 - WinUI native texture selector, side toolbar, FEN copy, evaluation strip, compact branch graph and two-column Chinese move list.
 - Multiple games; navigation, branch deletion/promotion, comments, undo/redo.
@@ -31,7 +31,11 @@ The native CTest targets cover:
 
 The previous JS prototype passed the original 41 TS tests. Those historical results do not claim that all 41 utility behaviors have already been reimplemented in native UI: player-clock presentation and annotation toggle controls remain below. Active verification now runs entirely in C++.
 
-Release and Debug builds each passed all four CTest targets and actual WinUI smoke tests. Native board source/destination clicks, both textures, flip and OXQ save/reopen passed. All 16 copied original image/SVG assets retain their source hashes. Real Pikafish returned depth 6, bestmove h2e2, ponder h9g7 and +0.52-pawn score (52 centipawns). Evidence and previews are under build/ during development. Run scripts/build.ps1 and scripts/smoke.ps1 to reproduce. Committed previews show the actual WinUI visual tree.
+Release and Debug builds each passed all four CTest targets and actual WinUI smoke tests. Native board source/destination clicks, both board styles, flip and OXQ save/reopen passed. Current OXDF-editor piece assets are verified byte-for-byte against the user-selected source directory. Real Pikafish returned depth 6, bestmove h2e2, ponder h9g7 and +0.52-pawn score (52 centipawns). Evidence and previews are under build/ during development. Run scripts/build.ps1 and scripts/smoke.ps1 to reproduce. Committed previews show the actual WinUI visual tree.
+
+## Latest visual update
+
+The user requested removal of wood artwork and selected OXDF-editor/assets/pieces. All 14 SVGs now load directly through WinUI; their source hashes match. The default board is flat, with bamboo retained as an option. Release and Debug UI builds and smoke tests passed with all 14 SVG decode events confirmed; the four native CTest targets also passed in Release. The review executable is build/winui/Release-oxdf/XiangqiNative.exe because the existing Release exe was running. Build/smoke scripts now accept an independent OutputDirectory.
 
 ## Next work
 
@@ -45,4 +49,4 @@ Release and Debug builds each passed all four CTest targets and actual WinUI smo
 
 ## Current limits
 
-Full-tree projections run synchronously and undo copies models; large-tree performance is unverified. PGN export is per active game. CBL diagnostics reject input pending a review UI. Theme selection is currently session-only. Only original traditional pieces are implemented. Competition repetition/chase adjudication is outside the inherited rule implementation.
+Full-tree projections run synchronously and undo copies models; large-tree performance is unverified. PGN export is per active game. CBL diagnostics reject input pending a review UI. Theme selection is currently session-only. The current piece set uses the user-selected OXDF-editor SVGs. Competition repetition/chase adjudication is outside the inherited rule implementation.

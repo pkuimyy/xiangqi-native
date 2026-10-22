@@ -1,7 +1,8 @@
-param([ValidateSet('Debug','Release')][string]$Configuration='Debug')
+param([ValidateSet('Debug','Release')][string]$Configuration='Debug',[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $repoPath=Split-Path -Parent $PSScriptRoot
-$exe=Join-Path $repoPath "build/winui/$Configuration/XiangqiNative.exe"
+$outputPath=if($OutputDirectory){if([IO.Path]::IsPathRooted($OutputDirectory)){$OutputDirectory}else{Join-Path $repoPath $OutputDirectory}}else{Join-Path $repoPath "build/winui/$Configuration"}
+$exe=Join-Path ([IO.Path]::GetFullPath($outputPath)) 'XiangqiNative.exe'
 $result=Join-Path (Split-Path $exe -Parent) 'smoke/result.json'
 if(Test-Path -LiteralPath $result){Remove-Item -LiteralPath $result}
 $process=Start-Process -FilePath $exe -ArgumentList '--smoke-test' -WorkingDirectory (Split-Path $exe -Parent) -WindowStyle Hidden -PassThru

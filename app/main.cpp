@@ -27,7 +27,6 @@
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.h>
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
-#include <winrt/Windows.Data.Xml.Dom.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Graphics.h>
@@ -86,82 +85,50 @@ std::wstring piece_name(char c) {
         return L"";
     }
 }
-// The original traditional SVG assets are interpreted as native WinUI shapes.
-struct PieceCircle {
-    double diameter, thickness;
-    std::string fill, stroke;
-};
-struct PieceArt {
-    std::vector<PieceCircle> circles;
-    hstring text;
-    double size{};
-    std::string color;
-};
-std::unordered_map<char, PieceArt> pieceArt;
+// User-provided OXDF-editor SVGs contain path glyphs, not font-dependent text.
+using Microsoft::UI::Xaml::Media::Imaging::SvgImageSource;
+std::unordered_map<char, SvgImageSource> pieceArt;
+std::unordered_set<char> loadedPieceArt, failedPieceArt;
 std::filesystem::path asset_root() {
     wchar_t module[MAX_PATH]{};
     GetModuleFileNameW(nullptr, module, MAX_PATH);
     return std::filesystem::path(module).parent_path() / L"assets";
 }
-SolidColorBrush hex_brush(const std::string &color) {
-    if (color == "none")
-        return SolidColorBrush(Color{0, 0, 0, 0});
-    auto n = std::stoul(color.substr(1), nullptr, 16);
-    return brush((n >> 16) & 255, (n >> 8) & 255, n & 255);
-}
 void load_piece_art() {
     const std::map<char, std::wstring> files = {
-        {'K', L"wking"},   {'k', L"bking"},   {'A', L"wadvisor"}, {'a', L"badvisor"}, {'B', L"wbishop"},
-        {'b', L"bbishop"}, {'N', L"wknight"}, {'n', L"bknight"},  {'R', L"wrook"},    {'r', L"brook"},
-        {'C', L"wcannon"}, {'c', L"bcannon"}, {'P', L"wpawn"},    {'p', L"bpawn"}};
+        {'K', L"red_king"},     {'k', L"black_king"},     {'A', L"red_advisor"}, {'a', L"black_advisor"},
+        {'B', L"red_elephant"}, {'b', L"black_elephant"}, {'N', L"red_horse"},   {'n', L"black_horse"},
+        {'R', L"red_rook"},     {'r', L"black_rook"},     {'C', L"red_cannon"},  {'c', L"black_cannon"},
+        {'P', L"red_pawn"},     {'p', L"black_pawn"}};
     for (auto &[piece, name] : files) {
-        std::ifstream input(asset_root() / L"pieces" / L"traditional" / (name + L".svg"), std::ios::binary);
-        if (!input)
-            throw std::runtime_error("Missing original piece resource");
-        std::string source((std::istreambuf_iterator<char>(input)), {});
-        Windows::Data::Xml::Dom::XmlDocument xml;
-        xml.LoadXml(to_hstring(source));
-        PieceArt art;
-        for (auto node : xml.GetElementsByTagName(L"circle")) {
-            auto element = node.as<Windows::Data::Xml::Dom::XmlElement>();
-            art.circles.push_back({2 * std::stod(to_string(element.GetAttribute(L"r"))),
-                                   std::stod(to_string(element.GetAttribute(L"stroke-width"))),
-                                   to_string(element.GetAttribute(L"fill")),
-                                   to_string(element.GetAttribute(L"stroke"))});
-        }
-        auto text = xml.GetElementsByTagName(L"text").Item(0).as<Windows::Data::Xml::Dom::XmlElement>();
-        art.text = text.InnerText();
-        art.size = std::stod(to_string(text.GetAttribute(L"font-size")));
-        art.color = to_string(text.GetAttribute(L"fill"));
-        pieceArt.emplace(piece, std::move(art));
+        if (!std::filesystem::exists(asset_root() / L"pieces" / (name + L".svg")))
+            throw std::runtime_error("Missing OXDF-editor piece resource");
+        SvgImageSource source;
+        source.Opened([piece](auto &&, auto &&) { loadedPieceArt.insert(piece); });
+        source.OpenFailed([piece](auto &&, auto &&) { failedPieceArt.insert(piece); });
+        source.UriSource(Windows::Foundation::Uri(L"ms-appx:///assets/pieces/" + name + L".svg"));
+        pieceArt.emplace(piece, source);
     }
 }
-Grid piece_visual(char c) {
-    auto &art = pieceArt.at(c);
-    Grid image;
-    image.Width(45);
-    image.Height(45);
-    image.IsHitTestVisible(false);
-    for (auto &circle : art.circles) {
-        Microsoft::UI::Xaml::Shapes::Ellipse e;
-        e.Width(circle.diameter);
-        e.Height(circle.diameter);
-        e.Fill(hex_brush(circle.fill));
-        e.Stroke(hex_brush(circle.stroke));
-        e.StrokeThickness(circle.thickness);
-        image.Children().Append(e);
-    }
-    TextBlock text;
-    text.Text(art.text);
-    text.FontFamily(FontFamily(L"SimSun"));
-    text.FontSize(art.size);
-    text.FontWeight(Windows::UI::Text::FontWeights::Bold());
-    text.Foreground(hex_brush(art.color));
-    text.HorizontalAlignment(HorizontalAlignment::Center);
-    text.VerticalAlignment(VerticalAlignment::Center);
-    text.Margin(Thickness{0, -2, 0, 0});
-    image.Children().Append(text);
-    return image;
+Canvas piece_visual(char c) {
+    // Original 96x96 SVGs have a 58px disc centred at 48,48.
+    // Crop only the transparent margin so the unchanged artwork fills a board piece.
+    Canvas frame;
+    frame.Width(45);
+    frame.Height(45);
+    frame.IsHitTestVisible(false);
+    RectangleGeometry clip;
+    clip.Rect(Windows::Foundation::Rect{0, 0, 45, 45});
+    frame.Clip(clip);
+    Image image;
+    constexpr double size = 45.0 * 96.0 / 62.0;
+    image.Width(size);
+    image.Height(size);
+    image.Source(pieceArt.at(c));
+    Canvas::SetLeft(image, (45 - size) / 2);
+    Canvas::SetTop(image, (45 - size) / 2);
+    frame.Children().Append(image);
+    return frame;
 }
 
 std::filesystem::path picker(HWND owner, bool save, const wchar_t *pattern, const wchar_t *extension) {
@@ -244,7 +211,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         t.Text(text);
         t.IsHitTestVisible(false);
         t.FontSize(size);
-        t.Foreground(bamboo ? brush(48, 76, 50) : brush(246, 234, 212));
+        t.Foreground(bamboo ? brush(48, 76, 50) : brush(99, 110, 125));
         t.FontFamily(FontFamily(L"SimSun"));
         Canvas::SetLeft(t, x);
         Canvas::SetTop(t, y);
@@ -404,7 +371,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         boardHeader.Children().Append(turn);
         auto texture = boardTexture;
         texture.MinWidth(110);
-        texture.Items().Append(box_value(L"木纹棋盘"));
+        texture.Items().Append(box_value(L"纯色棋盘"));
         texture.Items().Append(box_value(L"竹纹棋盘"));
         texture.SelectedIndex(0);
         texture.SelectionChanged([this](auto &&sender, auto &&) {
@@ -415,11 +382,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         leftPanel.Children().Append(boardHeader);
         board.Width(450);
         board.Height(500);
-        ImageBrush wood;
-        wood.ImageSource(Microsoft::UI::Xaml::Media::Imaging::BitmapImage(
-            Windows::Foundation::Uri(L"ms-appx:///assets/wood.jpg")));
-        wood.Stretch(Stretch::UniformToFill);
-        board.Background(wood);
+        board.Background(brush(245, 246, 248));
         Viewbox view;
         view.Stretch(Stretch::Uniform);
         view.Child(board);
@@ -787,11 +750,14 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     void draw_board() {
         board.Children().Clear();
         auto pos = doc().position();
-        ImageBrush texture;
-        texture.ImageSource(Microsoft::UI::Xaml::Media::Imaging::BitmapImage(Windows::Foundation::Uri(
-            bamboo ? L"ms-appx:///assets/bamboo.jpg" : L"ms-appx:///assets/wood.jpg")));
-        texture.Stretch(Stretch::Fill);
-        board.Background(texture);
+        if (bamboo) {
+            ImageBrush texture;
+            texture.ImageSource(Microsoft::UI::Xaml::Media::Imaging::BitmapImage(
+                Windows::Foundation::Uri(L"ms-appx:///assets/bamboo.jpg")));
+            texture.Stretch(Stretch::Fill);
+            board.Background(texture);
+        } else
+            board.Background(brush(245, 246, 248));
         if (!bamboo) {
             Image grid;
             grid.Width(450);
@@ -860,7 +826,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                 b.Content(dot);
             }
             Automation::AutomationProperties::SetName(
-                b, (squares[s] ? pieceArt.at(squares[s]).text : hstring(L"空位")) + L" " +
+                b, (squares[s] ? hstring(piece_name(squares[s])) : hstring(L"空位")) + L" " +
                        to_hstring(xqn_square(s)));
             Canvas::SetLeft(b, p.first - 24);
             Canvas::SetTop(b, p.second - 24);
@@ -1153,6 +1119,8 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             co_await winrt::resume_after(std::chrono::milliseconds(400));
             // Return to the window thread before accessing any controls.
             co_await ui;
+            if (!failedPieceArt.empty() || loadedPieceArt.size() != 14)
+                throw std::runtime_error("OXDF SVG resources failed to decode");
             co_await capture_preview(directory / L"native-preview.png");
             boardTexture.SelectedIndex(1);
             if (!bamboo)
@@ -1174,7 +1142,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                                              {"gameNodes", doc().model().move_tree.nodes.size()},
                                              {"preview", "native-preview.png"},
                                              {"boardClick", true},
-                                             {"pieceResources", pieceArt.size()},
+                                             {"pieceResources", loadedPieceArt.size()},
                                              {"textures", 2}}
                                        .dump(2)));
         } catch (const hresult_error &e) {

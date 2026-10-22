@@ -11,12 +11,13 @@ Independent Windows application. The user requires WinUI 3 native controls, C++ 
 - Document owns the authoritative OXQF GameModel; derived FEN/notation/layout are projections.
 - external/oxqf/: vendored source at 7d8a554, MIT.
 - external/json/: nlohmann/json 3.12.0, MIT.
-- assets/: original wood/bamboo textures and traditional SVGs. Piece SVG circle/text definitions are rendered as native WinUI controls.
+- assets/: plain native board by default, optional original bamboo board, and user-provided OXDF-editor SVG pieces. Load the original SVG paths through WinUI SvgImageSource; do not redraw glyphs using fonts. Wood resources are intentionally removed.
 - licenses/ and docs/DEPENDENCIES.md: retain source attribution.
 
 ## Validation
 
 Use PowerShell scripts/build.ps1 -Configuration Debug or Release; -CoreOnly skips WinUI.
+Build/smoke scripts accept -OutputDirectory for independent review builds when the existing exe is running. Preserve the running window; do not terminate it to release an output lock.
 All tests are native C++ and run through CTest. Do not introduce Node or JavaScript build steps.
 tests/fixtures/upstream-oracle.json records the original implementation before its removal. Do not rewrite expected output to conceal a regression.
 The legacy checkmate flag means no legal moves, including stalemate. The UI distinguishes the two using check.

@@ -14,9 +14,9 @@ Document owns the authoritative OXQF GameModel. FEN, notation and coordinates ar
 
 ## Native visuals
 
-The original wood.jpg and bamboo.jpg are copied unchanged. Native BitmapImage/ImageBrush loads them through app resource URIs. The original SVG board paths are retained for wood with an explicit palette; river lettering uses a native TextBlock. Bamboo is an unchanged complete board image, so it uses its own grid/river artwork with calibrated native piece coordinates.
+The default board uses a flat native brush and neutral SVG grid. Wood artwork is removed. Optional bamboo.jpg remains an unchanged complete board image, with calibrated native piece coordinates and no duplicate grid overlay.
 
-WinUI's SVG image decoder does not render SVG text. Each original traditional piece SVG is therefore read using the Windows XML DOM: its circles, radii, stroke widths, colors, text, font size and bold weight define native Ellipse/TextBlock controls. Rendering remains vector based. Missing piece assets fail startup visibly instead of silently substituting different graphics.
+The 14 OXDF-editor SVG pieces are copied unchanged from the user's selected directory. Their glyphs are paths, so WinUI SvgImageSource renders them directly instead of reconstructing circles/text. A clipped native Canvas crops transparent outer margins from the 96x96 documents. Native load events verify all 14 resources decode successfully in the UI smoke test. Missing resource files fail startup explicitly.
 
 Native Button controls supply focus, input and accessibility names; the compact branch tree and two-column move list also use Buttons. Viewbox scales the board; evaluation-strip proportions reflect the original winning-chance mapping. There is no HTML/CSS layout.
 
