@@ -1,15 +1,21 @@
 #include <shobjidl.h>
 #include <windows.h>
 #undef GetCurrentTime
+#include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <functional>
 #include <iomanip>
+#include <map>
 #include <microsoft.ui.xaml.window.h>
 #include <sstream>
 #include <thread>
 #include <unordered_set>
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Windowing.h>
+#include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
+#include <winrt/Microsoft.UI.Xaml.Automation.Provider.h>
+#include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Input.h>
@@ -20,6 +26,8 @@
 #include <winrt/Microsoft.UI.Xaml.XamlTypeInfo.h>
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.h>
+#include <winrt/Windows.ApplicationModel.DataTransfer.h>
+#include <winrt/Windows.Data.Xml.Dom.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Graphics.h>
@@ -78,6 +86,84 @@ std::wstring piece_name(char c) {
         return L"";
     }
 }
+// The original traditional SVG assets are interpreted as native WinUI shapes.
+struct PieceCircle {
+    double diameter, thickness;
+    std::string fill, stroke;
+};
+struct PieceArt {
+    std::vector<PieceCircle> circles;
+    hstring text;
+    double size{};
+    std::string color;
+};
+std::unordered_map<char, PieceArt> pieceArt;
+std::filesystem::path asset_root() {
+    wchar_t module[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, module, MAX_PATH);
+    return std::filesystem::path(module).parent_path() / L"assets";
+}
+SolidColorBrush hex_brush(const std::string &color) {
+    if (color == "none")
+        return SolidColorBrush(Color{0, 0, 0, 0});
+    auto n = std::stoul(color.substr(1), nullptr, 16);
+    return brush((n >> 16) & 255, (n >> 8) & 255, n & 255);
+}
+void load_piece_art() {
+    const std::map<char, std::wstring> files = {
+        {'K', L"wking"},   {'k', L"bking"},   {'A', L"wadvisor"}, {'a', L"badvisor"}, {'B', L"wbishop"},
+        {'b', L"bbishop"}, {'N', L"wknight"}, {'n', L"bknight"},  {'R', L"wrook"},    {'r', L"brook"},
+        {'C', L"wcannon"}, {'c', L"bcannon"}, {'P', L"wpawn"},    {'p', L"bpawn"}};
+    for (auto &[piece, name] : files) {
+        std::ifstream input(asset_root() / L"pieces" / L"traditional" / (name + L".svg"), std::ios::binary);
+        if (!input)
+            throw std::runtime_error("Missing original piece resource");
+        std::string source((std::istreambuf_iterator<char>(input)), {});
+        Windows::Data::Xml::Dom::XmlDocument xml;
+        xml.LoadXml(to_hstring(source));
+        PieceArt art;
+        for (auto node : xml.GetElementsByTagName(L"circle")) {
+            auto element = node.as<Windows::Data::Xml::Dom::XmlElement>();
+            art.circles.push_back({2 * std::stod(to_string(element.GetAttribute(L"r"))),
+                                   std::stod(to_string(element.GetAttribute(L"stroke-width"))),
+                                   to_string(element.GetAttribute(L"fill")),
+                                   to_string(element.GetAttribute(L"stroke"))});
+        }
+        auto text = xml.GetElementsByTagName(L"text").Item(0).as<Windows::Data::Xml::Dom::XmlElement>();
+        art.text = text.InnerText();
+        art.size = std::stod(to_string(text.GetAttribute(L"font-size")));
+        art.color = to_string(text.GetAttribute(L"fill"));
+        pieceArt.emplace(piece, std::move(art));
+    }
+}
+Grid piece_visual(char c) {
+    auto &art = pieceArt.at(c);
+    Grid image;
+    image.Width(45);
+    image.Height(45);
+    image.IsHitTestVisible(false);
+    for (auto &circle : art.circles) {
+        Microsoft::UI::Xaml::Shapes::Ellipse e;
+        e.Width(circle.diameter);
+        e.Height(circle.diameter);
+        e.Fill(hex_brush(circle.fill));
+        e.Stroke(hex_brush(circle.stroke));
+        e.StrokeThickness(circle.thickness);
+        image.Children().Append(e);
+    }
+    TextBlock text;
+    text.Text(art.text);
+    text.FontFamily(FontFamily(L"SimSun"));
+    text.FontSize(art.size);
+    text.FontWeight(Windows::UI::Text::FontWeights::Bold());
+    text.Foreground(hex_brush(art.color));
+    text.HorizontalAlignment(HorizontalAlignment::Center);
+    text.VerticalAlignment(VerticalAlignment::Center);
+    text.Margin(Thickness{0, -2, 0, 0});
+    image.Children().Append(text);
+    return image;
+}
+
 std::filesystem::path picker(HWND owner, bool save, const wchar_t *pattern, const wchar_t *extension) {
     com_ptr<IFileDialog> dialog;
     if (save)
@@ -113,13 +199,17 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     Window window;
     Grid root;
     Canvas board;
+    Grid evaluationStrip;
+    bool bamboo = false;
     Canvas graph;
+    StackPanel moveList;
     TextBlock status;
     TextBlock turn;
     TextBlock eval;
     TextBox comment;
     TextBox notation;
     ComboBox games;
+    ComboBox boardTexture;
     Button analyzeButton;
     NumberBox depth;
     HWND hwnd{};
@@ -152,8 +242,10 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     void label(Canvas const &canvas, const std::wstring &text, double x, double y, double size = 18) {
         TextBlock t;
         t.Text(text);
+        t.IsHitTestVisible(false);
         t.FontSize(size);
-        t.Foreground(brush(82, 57, 40));
+        t.Foreground(bamboo ? brush(48, 76, 50) : brush(246, 234, 212));
+        t.FontFamily(FontFamily(L"SimSun"));
         Canvas::SetLeft(t, x);
         Canvas::SetTop(t, y);
         canvas.Children().Append(t);
@@ -161,6 +253,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     void line(Canvas const &canvas, double x1, double y1, double x2, double y2, SolidColorBrush const &color,
               double thickness = 1) {
         Line l;
+        l.IsHitTestVisible(false);
         l.X1(x1);
         l.Y1(y1);
         l.X2(x2);
@@ -209,6 +302,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         }
     }
     void initialize() {
+        load_piece_art();
         docs.emplace_back(kernel);
         paths.emplace_back();
         wchar_t executable[MAX_PATH]{};
@@ -248,6 +342,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         header.Children().Append(button(L"打开…", [this] { open(); }));
         header.Children().Append(button(L"保存 OXQ", [this] { save(); }));
         header.Children().Append(button(L"导出 PGN…", [this] {
+            commit_comment();
             auto p = picker(hwnd, true, L"*.pgn", L"pgn");
             if (!p.empty())
                 xqn::save_atomic(p, bytes(doc().pgn()));
@@ -280,11 +375,13 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         }));
         toolbar.Children().Append(button(L"提升为主线", [this] {
             cancel();
+            commit_comment();
             doc().promote_current();
             refresh();
         }));
         toolbar.Children().Append(button(L"删除分支", [this] {
             cancel();
+            commit_comment();
             doc().erase_current();
             refresh();
         }));
@@ -301,15 +398,94 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         StackPanel leftPanel;
         leftPanel.Spacing(8);
         turn.FontSize(18);
-        leftPanel.Children().Append(turn);
-        board.Width(500);
-        board.Height(550);
-        board.Background(brush(242, 220, 176));
+        StackPanel boardHeader;
+        boardHeader.Orientation(Orientation::Horizontal);
+        boardHeader.Spacing(16);
+        boardHeader.Children().Append(turn);
+        auto texture = boardTexture;
+        texture.MinWidth(110);
+        texture.Items().Append(box_value(L"木纹棋盘"));
+        texture.Items().Append(box_value(L"竹纹棋盘"));
+        texture.SelectedIndex(0);
+        texture.SelectionChanged([this](auto &&sender, auto &&) {
+            bamboo = sender.template as<ComboBox>().SelectedIndex() == 1;
+            draw_board();
+        });
+        boardHeader.Children().Append(texture);
+        leftPanel.Children().Append(boardHeader);
+        board.Width(450);
+        board.Height(500);
+        ImageBrush wood;
+        wood.ImageSource(Microsoft::UI::Xaml::Media::Imaging::BitmapImage(
+            Windows::Foundation::Uri(L"ms-appx:///assets/wood.jpg")));
+        wood.Stretch(Stretch::UniformToFill);
+        board.Background(wood);
         Viewbox view;
         view.Stretch(Stretch::Uniform);
         view.Child(board);
         view.MaxHeight(570);
-        leftPanel.Children().Append(view);
+        Grid boardArea;
+        boardArea.ColumnSpacing(8);
+        for (auto width : {GridLength{8, GridUnitType::Pixel}, GridLength{1, GridUnitType::Star},
+                           GridLength{36, GridUnitType::Pixel}}) {
+            ColumnDefinition col;
+            col.Width(width);
+            boardArea.ColumnDefinitions().Append(col);
+        }
+        for (int i = 0; i < 2; i++) {
+            RowDefinition r;
+            r.Height(GridLength{1, GridUnitType::Star});
+            evaluationStrip.RowDefinitions().Append(r);
+        }
+        Border blackFill;
+        blackFill.Background(brush(27, 35, 49));
+        evaluationStrip.Children().Append(blackFill);
+        Border redFill;
+        redFill.Background(brush(253, 248, 239));
+        Grid::SetRow(redFill, 1);
+        evaluationStrip.Children().Append(redFill);
+        Border evaluationCard;
+        evaluationCard.CornerRadius(CornerRadius{4});
+        evaluationCard.BorderBrush(brush(206, 210, 218));
+        evaluationCard.BorderThickness(Thickness{1});
+        evaluationCard.Child(evaluationStrip);
+        boardArea.Children().Append(evaluationCard);
+        Border boardFrame;
+        boardFrame.CornerRadius(CornerRadius{8});
+        boardFrame.Child(view);
+        Grid::SetColumn(boardFrame, 1);
+        boardArea.Children().Append(boardFrame);
+        StackPanel rail;
+        rail.Spacing(6);
+        rail.VerticalAlignment(VerticalAlignment::Center);
+        auto railButton = [&](Symbol icon, const wchar_t *tip, std::function<void()> action) {
+            auto b = button(L"", action);
+            b.Content(SymbolIcon(icon));
+            b.Width(34);
+            b.Height(34);
+            b.MinWidth(0);
+            b.MinHeight(0);
+            b.Padding(Thickness{0});
+            b.CornerRadius(CornerRadius{17});
+            ToolTipService::SetToolTip(b, box_value(tip));
+            rail.Children().Append(b);
+        };
+        railButton(Symbol::Refresh, L"翻转棋盘", [this] {
+            flipped = !flipped;
+            draw_board();
+            refresh_evaluation_strip();
+        });
+        railButton(Symbol::Undo, L"撤销", [this] { navigate([this] { doc().undo(); }); });
+        railButton(Symbol::Redo, L"重做", [this] { navigate([this] { doc().redo(); }); });
+        railButton(Symbol::Copy, L"复制 FEN", [this] {
+            Windows::ApplicationModel::DataTransfer::DataPackage data;
+            data.SetText(to_hstring(doc().node(doc().current()).at("fen").get<std::string>()));
+            Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(data);
+            status.Text(L"已复制当前 FEN");
+        });
+        Grid::SetColumn(rail, 2);
+        boardArea.Children().Append(rail);
+        leftPanel.Children().Append(boardArea);
         StackPanel moveRow;
         moveRow.Orientation(Orientation::Horizontal);
         moveRow.Spacing(8);
@@ -367,8 +543,30 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         graphScroll.HorizontalContentAlignment(HorizontalAlignment::Left);
         graphScroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Auto);
         graphScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
-        Grid::SetRow(graphScroll, 1);
-        detail.Children().Append(graphScroll);
+        Grid study;
+        study.ColumnSpacing(12);
+        ColumnDefinition treeColumn;
+        treeColumn.Width(GridLength{1, GridUnitType::Star});
+        study.ColumnDefinitions().Append(treeColumn);
+        ColumnDefinition listColumn;
+        listColumn.Width(GridLength{238, GridUnitType::Pixel});
+        study.ColumnDefinitions().Append(listColumn);
+        Border treeCard;
+        treeCard.Background(brush(255, 255, 255));
+        treeCard.CornerRadius(CornerRadius{8});
+        treeCard.Child(graphScroll);
+        study.Children().Append(treeCard);
+        ScrollViewer moveScroll;
+        moveScroll.Content(moveList);
+        moveScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+        Border listCard;
+        listCard.Background(brush(255, 255, 255));
+        listCard.CornerRadius(CornerRadius{8});
+        listCard.Child(moveScroll);
+        Grid::SetColumn(listCard, 1);
+        study.Children().Append(listCard);
+        Grid::SetRow(study, 1);
+        detail.Children().Append(study);
         eval.TextWrapping(TextWrapping::Wrap);
         Grid::SetRow(eval, 2);
         detail.Children().Append(eval);
@@ -445,7 +643,31 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         selected = -1;
         refresh();
     }
+    void refresh_evaluation_strip() {
+        double redShare = .5;
+        auto meta = doc().node(doc().current()).at("meta");
+        if (meta.contains("eval")) {
+            auto ev = meta["eval"];
+            int score = ev.value("score", 0);
+            redShare = ev.value("scoreType", std::string("cp")) == "mate"
+                           ? (score > 0   ? .99
+                              : score < 0 ? .01
+                                          : .5)
+                           : 1.0 / (1.0 + std::exp(-.00368208 * score));
+        }
+        redShare = (std::clamp)(redShare, .01, .99);
+        evaluationStrip.RowDefinitions().GetAt(0).Height(
+            GridLength{flipped ? redShare : 1 - redShare, GridUnitType::Star});
+        evaluationStrip.RowDefinitions().GetAt(1).Height(
+            GridLength{flipped ? 1 - redShare : redShare, GridUnitType::Star});
+        evaluationStrip.Children().GetAt(0).as<Border>().Background(flipped ? brush(253, 248, 239)
+                                                                            : brush(27, 35, 49));
+        evaluationStrip.Children().GetAt(1).as<Border>().Background(flipped ? brush(27, 35, 49)
+                                                                            : brush(253, 248, 239));
+    }
+
     void refresh() {
+        refresh_evaluation_strip();
         draw_board();
         draw_graph();
         std::wstring text;
@@ -489,7 +711,10 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             f = 8 - f;
             r = 9 - r;
         }
-        return {42.0 + f * 52, 40.0 + (9 - r) * 51};
+        // Bamboo is a complete 537x600 board image, with its own grid.
+        if (bamboo)
+            return {450.0 * (32.0 + 58.875 * f) / 537.0, 500.0 * (32.0 + 59.222222 * (9 - r)) / 600.0};
+        return {25.0 + f * 50, 25.0 + (9 - r) * 50};
     }
     void arrow(int from, int to, SolidColorBrush color) {
         auto a = point(from), b = point(to);
@@ -562,6 +787,34 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     void draw_board() {
         board.Children().Clear();
         auto pos = doc().position();
+        ImageBrush texture;
+        texture.ImageSource(Microsoft::UI::Xaml::Media::Imaging::BitmapImage(Windows::Foundation::Uri(
+            bamboo ? L"ms-appx:///assets/bamboo.jpg" : L"ms-appx:///assets/wood.jpg")));
+        texture.Stretch(Stretch::Fill);
+        board.Background(texture);
+        if (!bamboo) {
+            Image grid;
+            grid.Width(450);
+            grid.Height(500);
+            grid.IsHitTestVisible(false);
+            grid.Source(Microsoft::UI::Xaml::Media::Imaging::SvgImageSource(
+                Windows::Foundation::Uri(L"ms-appx:///assets/board-grid.svg")));
+            board.Children().Append(grid);
+            label(board, L"楚 河", 72, 229, 28);
+            label(board, L"漢 界", 322, 229, 28);
+        }
+        auto legal = pos.at("moves");
+        std::unordered_set<int> destinations;
+        if (selected >= 0)
+            for (auto &m : legal)
+                if (m.at("from") == selected)
+                    destinations.insert(m.at("to").get<int>());
+        auto &current = doc().node(doc().current());
+        int lastFrom = -1, lastTo = -1;
+        if (!current.at("move").is_null()) {
+            lastFrom = current["move"]["from"];
+            lastTo = current["move"]["to"];
+        }
         std::array<char, 90> squares{};
         std::istringstream input(pos.at("fen").get<std::string>());
         std::string fen;
@@ -576,49 +829,41 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             else
                 squares.at(rank * 9 + file++) = c;
         }
-        auto grid = brush(123, 87, 49);
-        for (int r = 0; r < 10; ++r)
-            line(board, 42, 40 + r * 51, 458, 40 + r * 51, grid);
-        for (int f = 0; f < 9; ++f) {
-            line(board, 42 + f * 52, 40, 42 + f * 52, 244, grid);
-            line(board, 42 + f * 52, 295, 42 + f * 52, 499, grid);
-        }
-        line(board, 42, 244, 42, 295, grid);
-        line(board, 458, 244, 458, 295, grid);
-        line(board, 198, 40, 302, 142, grid);
-        line(board, 302, 40, 198, 142, grid);
-        line(board, 198, 397, 302, 499, grid);
-        line(board, 302, 397, 198, 499, grid);
-        label(board, L"楚 河", 118, 252, 24);
-        label(board, L"汉 界", 307, 252, 24);
-        draw_annotations();
-        std::unordered_set<int> destinations;
-        if (selected >= 0)
-            for (auto &m : pos.at("moves"))
-                if (m.at("from") == selected)
-                    destinations.insert(m.at("to").get<int>());
-        for (int s = 0; s < 90; ++s) {
-            int f = s % 9, r = s / 9;
-            if (flipped) {
-                f = 8 - f;
-                r = 9 - r;
-            }
+        for (int s = 0; s < 90; s++) {
+            auto p = point(s);
             Button b;
-            b.Width(44);
-            b.Height(44);
+            b.Width(48);
+            b.Height(48);
             b.Padding(Thickness{0});
-            b.CornerRadius(CornerRadius{22, 22, 22, 22});
-            auto c = squares[s];
-            b.Content(box_value(c ? piece_name(c) : (destinations.contains(s) ? L"●" : L"")));
-            b.FontSize(c ? 27 : 15);
-            b.Foreground(c && std::isupper(c) ? brush(170, 38, 36) : brush(35, 41, 38));
-            b.Background(c ? brush(255, 242, 205) : SolidColorBrush(Color{0, 0, 0, 0}));
-            b.BorderThickness(Thickness{c ? 1.5 : 0, c ? 1.5 : 0, c ? 1.5 : 0, c ? 1.5 : 0});
-            b.BorderBrush(s == selected ? brush(24, 129, 98) : grid);
-            if (s == selected)
-                b.BorderThickness(Thickness{3, 3, 3, 3});
-            Canvas::SetLeft(b, 20 + f * 52);
-            Canvas::SetTop(b, 18 + (9 - r) * 51);
+            b.CornerRadius(CornerRadius{24});
+            b.Background(SolidColorBrush(Color{0, 0, 0, 0}));
+            b.BorderThickness(Thickness{0});
+            b.HorizontalContentAlignment(HorizontalAlignment::Center);
+            b.VerticalContentAlignment(VerticalAlignment::Center);
+            if (s == lastFrom || s == lastTo) {
+                b.Background(SolidColorBrush(Color{80, 192, 132, 252}));
+                b.BorderBrush(brush(172, 100, 225));
+                b.BorderThickness(Thickness{1.5});
+            }
+            if (s == selected) {
+                b.BorderBrush(brush(34, 211, 238));
+                b.BorderThickness(Thickness{2.5});
+            }
+            if (squares[s])
+                b.Content(piece_visual(squares[s]));
+            else if (destinations.contains(s)) {
+                Microsoft::UI::Xaml::Shapes::Ellipse dot;
+                dot.Width(12);
+                dot.Height(12);
+                dot.Fill(brush(30, 120, 100));
+                dot.Opacity(.6);
+                b.Content(dot);
+            }
+            Automation::AutomationProperties::SetName(
+                b, (squares[s] ? pieceArt.at(squares[s]).text : hstring(L"空位")) + L" " +
+                       to_hstring(xqn_square(s)));
+            Canvas::SetLeft(b, p.first - 24);
+            Canvas::SetTop(b, p.second - 24);
             b.Click([this, s](auto &&, auto &&) {
                 run([this, s] {
                     if (selected == s) {
@@ -627,18 +872,23 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                         return;
                     }
                     auto position = doc().position();
-                    if (selected >= 0) {
+                    if (selected >= 0)
                         for (auto &m : position.at("moves"))
                             if (m.at("from") == selected && m.at("to") == s) {
                                 navigate([this, s] { doc().play(selected, s); });
                                 return;
                             }
-                    }
                     selected = s;
                     draw_board();
                 });
             });
             board.Children().Append(b);
+        }
+        draw_annotations();
+        const std::wstring numbers = L"九八七六五四三二一";
+        for (int f = 0; f < 9; f++) {
+            label(board, std::to_wstring(flipped ? 9 - f : f + 1), 20 + f * 50, 0, 12);
+            label(board, std::wstring(1, numbers[flipped ? 8 - f : f]), 19 + f * 50, 481, 12);
         }
         turn.Text(pos.at("turn") == "w" ? L"红方行棋" : L"黑方行棋");
         if (pos.at("checkmate") == true)
@@ -646,48 +896,153 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         else if (pos.at("check") == true)
             turn.Text(turn.Text() + L" · 将军");
     }
+    static std::string xqn_square(int s) { return std::string(1, char('a' + s % 9)) + char('0' + s / 9); }
+
     void draw_graph() {
         graph.Children().Clear();
+        moveList.Children().Clear();
         auto data = doc().transport();
         std::unordered_map<std::string, std::pair<double, double>> points;
+        std::unordered_map<std::string, xqn::Json> byid;
+        std::unordered_set<std::string> path;
+        auto cursor = std::to_string(doc().current());
+        for (auto &n : data.at("nodes"))
+            byid[n.at("id").get<std::string>()] = doc().node(std::stoull(n.at("id").get<std::string>()));
+        for (auto id = cursor;;) {
+            path.insert(id);
+            auto &p = byid.at(id).at("parent");
+            if (p.is_null())
+                break;
+            id = p.get<std::string>();
+        }
         double minx = 0, maxx = 0, maxy = 0;
         for (auto &n : data.at("nodes")) {
-            auto id = std::stoull(n.at("id").get<std::string>());
-            auto &view = doc().node(id);
-            double x = view.value("x", 0.0) * 150, y = view.value("y", 0.0) * 50;
+            auto id = n.at("id").get<std::string>();
+            auto &v = doc().node(std::stoull(id));
+            double x = v.value("x", 0.0) * 24, y = v.value("y", 0.0) * 30;
             minx = (std::min)(minx, x);
             maxx = (std::max)(maxx, x);
             maxy = (std::max)(maxy, y);
-            points[n.at("id")] = {x, y};
+            points[id] = {x, y};
         }
-        graph.Width((std::max)(500.0, maxx - minx + 140));
-        graph.Height((std::max)(260.0, maxy + 70));
+        graph.Width((std::max)(220.0, maxx - minx + 80));
+        graph.Height((std::max)(270.0, maxy + 60));
         for (auto &n : data.at("nodes"))
             if (!n.at("parent").is_null()) {
-                auto a = points.at(n.at("parent")), b = points.at(n.at("id"));
-                line(graph, a.first - minx + 70, a.second + 35, b.first - minx + 70, b.second + 35,
-                     brush(153, 161, 156), 1.5);
+                auto id = n.at("id").get<std::string>();
+                auto a = points.at(n.at("parent")), b = points.at(id);
+                auto color = path.contains(id) ? brush(108, 113, 125) : brush(192, 197, 204);
+                double ax = a.first - minx + 40, ay = a.second + 26, bx = b.first - minx + 40,
+                       by = b.second + 26;
+                line(graph, ax, ay, ax, by - 15, color, 1.5);
+                line(graph, ax, by - 15, bx, by - 15, color, 1.5);
+                line(graph, bx, by - 15, bx, by, color, 1.5);
             }
         for (auto &n : data.at("nodes")) {
-            auto id = std::stoull(n.at("id").get<std::string>());
-            auto p = points.at(n.at("id"));
-            auto &view = doc().node(id);
-            auto text =
-                view.at("move").is_null() ? std::string("开局") : view.at("move").at("zh").get<std::string>();
-            Button b =
-                button(to_hstring(text).c_str(), [this, id] { navigate([this, id] { doc().select(id); }); });
-            b.Width(105);
-            b.Height(34);
-            b.Padding(Thickness{4, 4, 4, 4});
-            if (id == doc().current()) {
-                b.Background(brush(24, 115, 90));
-                b.Foreground(brush(255, 255, 255));
-            }
-            Canvas::SetLeft(b, p.first - minx + 18);
-            Canvas::SetTop(b, p.second + 18);
+            auto id = n.at("id").get<std::string>();
+            auto p = points.at(id);
+            auto &view = doc().node(std::stoull(id));
+            bool start = view.at("move").is_null();
+            auto notation =
+                start ? std::wstring(L"始") : std::wstring(to_hstring(view["move"]["zh"].get<std::string>()));
+            bool prefix = !start && !notation.empty() &&
+                          std::wstring(L"前后中一二三四五").find(notation[0]) != std::wstring::npos;
+            auto text = notation.substr(prefix ? 1 : 0, 1);
+            auto b =
+                button(text.c_str(), [this, id] { navigate([this, id] { doc().select(std::stoull(id)); }); });
+            b.Width(24);
+            b.Height(24);
+            b.MinWidth(0);
+            b.MinHeight(0);
+            b.Padding(Thickness{0});
+            b.CornerRadius(CornerRadius{5});
+            b.FontSize(14);
+            b.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
+            b.BorderThickness(Thickness{0});
+            bool red = false;
+            if (!n["parent"].is_null())
+                red = byid.at(n["parent"])["fen"].get<std::string>().find(" w ") != std::string::npos;
+            b.Background(id == cursor ? brush(124, 58, 237)
+                         : start      ? brush(90, 100, 115)
+                         : red        ? brush(134, 24, 24)
+                                      : brush(10, 28, 58));
+            b.Foreground(brush(255, 255, 255));
+            b.Opacity(path.contains(id) || start ? 1.0 : .55);
+            if (!start)
+                ToolTipService::SetToolTip(b, box_value(to_hstring(view["move"]["zh"].get<std::string>())));
+            Canvas::SetLeft(b, p.first - minx + 28);
+            Canvas::SetTop(b, p.second + 14);
             graph.Children().Append(b);
         }
+        // Follow the selected variation, then its main continuation.
+        std::vector<std::string> route;
+        auto id = cursor;
+        while (!byid.at(id)["parent"].is_null()) {
+            route.push_back(id);
+            id = byid.at(id)["parent"].get<std::string>();
+        }
+        std::reverse(route.begin(), route.end());
+        id = cursor;
+        while (!byid.at(id)["children"].empty()) {
+            id = byid.at(id)["children"][0].get<std::string>();
+            route.push_back(id);
+        }
+        int row = 0;
+        Grid moves;
+        moves.RowSpacing(2);
+        moves.ColumnSpacing(4);
+        for (auto width : {34.0, 94.0, 94.0}) {
+            ColumnDefinition c;
+            c.Width(GridLength{width, GridUnitType::Pixel});
+            moves.ColumnDefinitions().Append(c);
+        }
+        bool previousRed = false;
+        for (auto &nodeId : route) {
+            auto &n = byid.at(nodeId);
+            auto before = byid.at(n["parent"]);
+            std::istringstream fen(before["fen"].get<std::string>());
+            std::string placement, side, flag1, flag2;
+            int half = 0, full = 1;
+            fen >> placement >> side >> flag1 >> flag2 >> half >> full;
+            bool red = side == "w";
+            if (row == 0 || red || !previousRed) {
+                RowDefinition r;
+                r.Height(GridLength{32, GridUnitType::Pixel});
+                moves.RowDefinitions().Append(r);
+                TextBlock number;
+                number.Text(std::to_wstring(full) + L".");
+                number.FontSize(12);
+                number.VerticalAlignment(VerticalAlignment::Center);
+                number.Foreground(brush(135, 140, 150));
+                Grid::SetRow(number, row);
+                moves.Children().Append(number);
+                ++row;
+            }
+            auto text = to_hstring(doc().node(std::stoull(nodeId))["move"]["zh"].get<std::string>());
+            auto b = button(text.c_str(), [this, nodeId] {
+                navigate([this, nodeId] { doc().select(std::stoull(nodeId)); });
+            });
+            b.Padding(Thickness{4, 0, 4, 0});
+            b.Height(30);
+            b.MinHeight(0);
+            b.MinWidth(0);
+            b.HorizontalAlignment(HorizontalAlignment::Stretch);
+            b.Background(SolidColorBrush(Color{0, 0, 0, 0}));
+            b.BorderThickness(Thickness{0});
+            b.FontSize(14);
+            if (nodeId == cursor) {
+                b.Background(brush(235, 224, 251));
+                b.Foreground(brush(109, 40, 217));
+            } else
+                b.Foreground(red ? brush(153, 35, 35) : brush(39, 49, 65));
+            Grid::SetRow(b, row - 1);
+            Grid::SetColumn(b, red ? 1 : 2);
+            moves.Children().Append(b);
+            previousRed = red;
+        }
+        moveList.Children().Append(moves);
     }
+
     void open() {
         auto p = picker(hwnd, false, L"*.oxq;*.pgn;*.cbl", L"oxq");
         if (p.empty())
@@ -720,6 +1075,40 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         refresh();
     }
 
+    Windows::Foundation::IAsyncAction capture_preview(const std::filesystem::path &path) {
+        Microsoft::UI::Xaml::Media::Imaging::RenderTargetBitmap bitmap;
+        co_await bitmap.RenderAsync(root);
+        auto pixels = co_await bitmap.GetPixelsAsync();
+        auto folder =
+            co_await Windows::Storage::StorageFolder::GetFolderFromPathAsync(path.parent_path().wstring());
+        auto image = co_await folder.CreateFileAsync(
+            path.filename().wstring(), Windows::Storage::CreationCollisionOption::ReplaceExisting);
+        auto stream = co_await image.OpenAsync(Windows::Storage::FileAccessMode::ReadWrite);
+        auto encoder = co_await Windows::Graphics::Imaging::BitmapEncoder::CreateAsync(
+            Windows::Graphics::Imaging::BitmapEncoder::PngEncoderId(), stream);
+        std::vector<std::uint8_t> data(pixels.Length());
+        Windows::Storage::Streams::DataReader::FromBuffer(pixels).ReadBytes(data);
+        encoder.SetPixelData(Windows::Graphics::Imaging::BitmapPixelFormat::Bgra8,
+                             Windows::Graphics::Imaging::BitmapAlphaMode::Premultiplied, bitmap.PixelWidth(),
+                             bitmap.PixelHeight(), 96, 96, data);
+        co_await encoder.FlushAsync();
+        stream.Close();
+    }
+    void invoke_square(int square) {
+        using namespace Microsoft::UI::Xaml::Automation;
+        auto suffix = L" " + std::wstring(to_hstring(xqn_square(square)));
+        for (auto child : board.Children())
+            if (auto control = child.try_as<Button>()) {
+                auto name = std::wstring(AutomationProperties::GetName(control));
+                if (name.ends_with(suffix)) {
+                    Peers::ButtonAutomationPeer peer(control);
+                    peer.GetPattern(Peers::PatternInterface::Invoke).as<Provider::IInvokeProvider>().Invoke();
+                    return;
+                }
+            }
+        throw std::runtime_error("Board square button missing");
+    }
+
     fire_and_forget smoke_test() {
         winrt::apartment_context ui;
         auto keep = shared_from_this();
@@ -738,6 +1127,22 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             refresh();
             if (board.Children().Size() < 90 || graph.Children().Size() < 7)
                 throw std::runtime_error("Native controls did not populate");
+            co_await winrt::resume_after(std::chrono::milliseconds(100));
+            co_await ui;
+            auto beforeClick = doc().current();
+            invoke_square(70);
+            co_await winrt::resume_after(std::chrono::milliseconds(30));
+            co_await ui;
+            if (selected != 70)
+                throw std::runtime_error("Board source click failed");
+            invoke_square(67);
+            co_await winrt::resume_after(std::chrono::milliseconds(30));
+            co_await ui;
+            if (doc().current() == beforeClick || doc().node(doc().current()).at("move").at("lan") != "h7e7")
+                throw std::runtime_error("Board destination click failed");
+            doc().select(beforeClick);
+            refresh();
+
             const auto file = directory / L"原生往返.oxq";
             xqn::save_atomic(file, doc().oxq());
             auto loaded = xqn::open_documents(kernel, file);
@@ -748,29 +1153,29 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             co_await winrt::resume_after(std::chrono::milliseconds(400));
             // Return to the window thread before accessing any controls.
             co_await ui;
-            Microsoft::UI::Xaml::Media::Imaging::RenderTargetBitmap bitmap;
-            co_await bitmap.RenderAsync(root);
-            auto pixels = co_await bitmap.GetPixelsAsync();
-            auto folder =
-                co_await Windows::Storage::StorageFolder::GetFolderFromPathAsync(directory.wstring());
-            auto image = co_await folder.CreateFileAsync(
-                L"native-preview.png", Windows::Storage::CreationCollisionOption::ReplaceExisting);
-            auto stream = co_await image.OpenAsync(Windows::Storage::FileAccessMode::ReadWrite);
-            auto encoder = co_await Windows::Graphics::Imaging::BitmapEncoder::CreateAsync(
-                Windows::Graphics::Imaging::BitmapEncoder::PngEncoderId(), stream);
-            std::vector<std::uint8_t> data(pixels.Length());
-            Windows::Storage::Streams::DataReader::FromBuffer(pixels).ReadBytes(data);
-            encoder.SetPixelData(Windows::Graphics::Imaging::BitmapPixelFormat::Bgra8,
-                                 Windows::Graphics::Imaging::BitmapAlphaMode::Premultiplied,
-                                 bitmap.PixelWidth(), bitmap.PixelHeight(), 96, 96, data);
-            co_await encoder.FlushAsync();
-            stream.Close();
+            co_await capture_preview(directory / L"native-preview.png");
+            boardTexture.SelectedIndex(1);
+            if (!bamboo)
+                throw std::runtime_error("Native texture selector failed");
+            flipped = true;
+            draw_board();
+            refresh_evaluation_strip();
+            co_await winrt::resume_after(std::chrono::milliseconds(300));
+            co_await ui;
+            co_await capture_preview(directory / L"bamboo-preview.png");
+            flipped = false;
+            boardTexture.SelectedIndex(0);
+            refresh();
+
             xqn::save_atomic(directory / L"result.json",
                              bytes(xqn::Json{{"passed", true},
                                              {"boardControls", board.Children().Size()},
                                              {"graphControls", graph.Children().Size()},
                                              {"gameNodes", doc().model().move_tree.nodes.size()},
-                                             {"preview", "native-preview.png"}}
+                                             {"preview", "native-preview.png"},
+                                             {"boardClick", true},
+                                             {"pieceResources", pieceArt.size()},
+                                             {"textures", 2}}
                                        .dump(2)));
         } catch (const hresult_error &e) {
             xqn::save_atomic(directory / L"result.json",

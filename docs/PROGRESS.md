@@ -1,44 +1,48 @@
 # Migration progress
 
-Date: 2026-10-23. This is an implementation checkpoint, not a claim of complete feature parity.
+Date: 2026-10-23. The current checkpoint implements the user's C++-only requirement and reuses original graphical resources. Full original-feature parity remains in progress.
 
 ## Implemented
 
-- Independent Git repository; WinUI 3/C++20 application and source builds.
-- Embedded original rules 1.0.3, Chinese/ICCS notation, original PGN parser/stringifier and original Walker tree layout.
-- Native click-to-move board, board flip, branch graph selection and legal destinations.
-- Native arrows/highlights from existing annotation data and stored best-move arrows.
-- Multiple opened games with native selector; navigation, branch deletion/promotion, undo/redo.
-- Human comment editing; pending text is committed before navigation/save.
-- OXQF authoritative game model, PGN import/export and rich metadata OXQ round-trip.
-- Unicode file paths, Windows native file pickers, atomic overwrite.
-- UCI native process with depth, skill/MultiPV protocol, cancellation, timeout, Red-view evaluation conversion and stale-result protection.
-- Automatic discovery of a pinned optional native Pikafish distribution.
-- Actual WinUI startup/render/save smoke test with a generated preview.
+- Independent Git repository and WinUI 3/C++20 application.
+- Native C++ rules/FEN, Chinese/WXF/ICCS notation, PGN/comment metadata and Walker layout.
+- QuickJS, JS/TS sources, generated bundles, npm manifests and Node CI steps removed.
+- Original wood/bamboo textures, 14 traditional piece SVG definitions and board paths.
+- Native vector pieces, board click-to-move/flip, legal dots, last-move highlights, annotations and best-move arrows.
+- WinUI native texture selector, side toolbar, FEN copy, evaluation strip, compact branch graph and two-column Chinese move list.
+- Multiple games; navigation, branch deletion/promotion, comments, undo/redo.
+- OXQF authoritative model; rich metadata and original unknown annotations preserved.
+- PGN import/export; Unicode paths, native file dialogs and atomic OXQ overwrite.
+- Native UCI analysis with cancellation, timeout, stale-result protection and Red-view scores.
+- Automatic discovery of pinned optional Pikafish and NNUE.
+- Actual app startup, save/reopen and rendered visual-tree smoke test.
 
-## Verified during development
+## Validation
 
-- Original application regression tests: 41 passed.
-- Bundled kernel comparison tests: 4 passed, covering all initial moves and deterministic game sequences.
-- Native C++ document and engine test targets passed in Debug and Release.
-- Native engine process tests cover MultiPV, bound scores, ponder, score orientation, cancellation/reuse and timeout.
-- Actual Pikafish 2026-09-06 returned depth-6 analysis with bestmove h2e2 for the standard opening.
-- Actual WinUI startup/render/save test passed with a 7-node branched game.
-- Development dependencies updated to a clean npm audit result.
+The native CTest targets cover:
+- 600 original deterministic positions and 23,063 legal moves, including generated Chinese replay.
+- 8 endgame/repeated-piece positions and all their move results.
+- 25 PGN inputs, including original parser cases, variations, comments, NAGs, result, authors, shapes, clocks, evaluations and custom FEN numbering.
+- Exact original Walker coordinates for a 232-node branching tree.
+- 2048-ply native layout, PGN export and re-import with explicit traversal stacks.
+- Cannon screens, horse legs, elephant eyes, pinned pieces, river crossing, FEN validation, retreats, traditional input aliases, escaped headers and invalid trees.
+- OXQ/PGN document edits, metadata, undo/redo, Unicode atomic overwrite.
+- UCI handshakes, score bounds, MultiPV, ponder, orientation, cancellation/reuse and timeout.
 
-Release build and the final screenshot are recorded in the current implementation session; repeat scripts/build.ps1 and scripts/smoke.ps1 to regenerate local evidence.
+The previous JS prototype passed the original 41 TS tests. Those historical results do not claim that all 41 utility behaviors have already been reimplemented in native UI: player-clock presentation and annotation toggle controls remain below. Active verification now runs entirely in C++.
 
-## Next work, in order
+Release and Debug builds each passed all four CTest targets and actual WinUI smoke tests. Native board source/destination clicks, both textures, flip and OXQ save/reopen passed. All 16 copied original image/SVG assets retain their source hashes. Real Pikafish returned depth 6, bestmove h2e2, ponder h9g7 and +0.52-pawn score (52 centipawns). Evidence and previews are under build/ during development. Run scripts/build.ps1 and scripts/smoke.ps1 to reproduce. Committed previews show the actual WinUI visual tree.
 
-1. Native interaction regression tests: exercise the actual board click handler, dragging, keyboard accelerators, branch navigation/folding and comment workflows.
-2. Position editor, native move list, glyph/arrow editing, preview boards and richer evaluation presentation.
-3. Automatic/batch analysis and play-against-engine, including move-history context and robust engine scheduling.
-4. External-file conflict handling, backups, autosave and crash recovery.
-5. CBL conversion diagnostics UI and export; whole-collection PGN/CBL workflows.
-6. Native PNG/GIF export, themes/piece sets, speech, sound and settings persistence.
-7. Incremental/cancellable calculation, large-tree rendering and library indexing.
-8. Installer, file associations, clean-machine deployment checks and release packaging.
+## Next work
 
-## Practical limits
+1. Drag/drop moves, arrow/highlight editing, annotation toggles, result controls, branch folding and keyboard interaction coverage.
+2. Position editor, alternative original piece sets, player names/clocks and preview boards.
+3. Automatic/batch analysis and human-versus-engine play with move-history context.
+4. File conflicts, backups, autosave/crash recovery and persisted preferences.
+5. Collection export, CBL conversion diagnostics UI, native image/GIF export.
+6. Incremental/cancellable computation, virtualization and large-library indexing.
+7. Installer/file associations, clean-machine deployment checks and release packaging.
 
-The current UI still computes full tree projections on the UI thread and has not been benchmarked for large trees. Undo stores full model copies. CBL imports with diagnostics are currently rejected. PGN export operates on the active game. There is no autosave or external-edit conflict detection yet. Full original-feature parity is not complete.
+## Current limits
+
+Full-tree projections run synchronously and undo copies models; large-tree performance is unverified. PGN export is per active game. CBL diagnostics reject input pending a review UI. Theme selection is currently session-only. Only original traditional pieces are implemented. Competition repetition/chase adjudication is outside the inherited rule implementation.

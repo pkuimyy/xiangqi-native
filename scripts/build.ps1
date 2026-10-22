@@ -18,7 +18,7 @@ Push-Location $repoPath
 try{
  & $cmake -S . -B build/native -G 'Ninja Multi-Config' "-DCMAKE_MAKE_PROGRAM=$ninja"
  if($LASTEXITCODE -ne 0){throw 'CMake configure failed'}
- & $cmake --build build/native --config $Configuration --target xiangqi_cli xiangqi_core_tests xiangqi_engine_tests fake_uci
+ & $cmake --build build/native --config $Configuration --target xiangqi_cli xiangqi_core_tests xiangqi_engine_tests fake_uci xiangqi_parity_tests xiangqi_rules_tests
  if($LASTEXITCODE -ne 0){throw 'Native build failed'}
  & $ctest --test-dir build/native -C $Configuration --output-on-failure
  if($LASTEXITCODE -ne 0){throw 'Native tests failed'}

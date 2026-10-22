@@ -1,32 +1,27 @@
 # Xiangqi Native
 
-Independent Windows native application. The user approved WinUI 3, C++20, and OXQF; retain the original rules, Chinese notation, PGN, and Pikafish behavior.
+Independent Windows application. The user requires WinUI 3 native controls, C++ throughout, no Node.js or JavaScript runtime. Reuse original visual assets and migrate rules, Chinese notation, PGN and Pikafish behavior.
 
 ## Architecture
 
-- app/: WinUI 3 programmatic native UI, no WebView or browser UI.
-- src/core/ and include/xiangqi/: native document authority, format mapping, atomic file writes, native UCI process.
-- kernel/upstream/: copied pure calculation code from obsidian-xiangqi c6f2197; preserve upstream files and prefer adapters.
-- kernel/bridge.ts: calculation-only adapter. Embedded QuickJS has no DOM, Obsidian, Node, network or filesystem bindings.
-- kernel/generated/: committed deterministic source bundle and byte array, so normal C++ builds need no Node runtime.
-- external/oxqf/: vendored source at 7d8a554, with original MIT license.
-- external/quickjs/: git submodule pinned to v0.17.0 (6d46d07d04041b40f4f49eaa7fdebe44c314c699).
-- reference/xiangqi.js/: original locked npm package 1.0.3 and BSD-2-Clause license.
-- reference/obsidian-tests/: original regression tests with import remapping.
+- app/: programmatic C++/WinRT UI. No WebView host.
+- src/core/rules.cpp: native rules, FEN, Chinese/WXF/ICCS notation.
+- src/core/pgn.cpp: native PGN parser/stringifier and original comment metadata conventions.
+- src/core/layout.cpp: C++ port of the original Walker/Buchheim layout.
+- Document owns the authoritative OXQF GameModel; derived FEN/notation/layout are projections.
+- external/oxqf/: vendored source at 7d8a554, MIT.
+- external/json/: nlohmann/json 3.12.0, MIT.
+- assets/: original wood/bamboo textures and traditional SVGs. Piece SVG circle/text definitions are rendered as native WinUI controls.
+- licenses/ and docs/DEPENDENCIES.md: retain source attribution.
 
 ## Validation
 
-Use PowerShell scripts/build.ps1 -Configuration Debug (or -CoreOnly).
-Run npm ci --ignore-scripts, npm run kernel:build, npm run kernel:test and npm run upstream:test when calculation sources change.
-Do not modify upstream algorithms to satisfy an adapter test; inspect original behavior first.
-Rules package isCheckmate() means no legal moves, including stalemate; isStalemate() returns false. The UI distinguishes checkmate from stalemate using isCheck().
+Use PowerShell scripts/build.ps1 -Configuration Debug or Release; -CoreOnly skips WinUI.
+All tests are native C++ and run through CTest. Do not introduce Node or JavaScript build steps.
+tests/fixtures/upstream-oracle.json records the original implementation before its removal. Do not rewrite expected output to conceal a regression.
+The legacy checkmate flag means no legal moves, including stalemate. The UI distinguishes the two using check.
 OXQ NodeId is session-local; never use it as a persistent external key.
-Node machine metadata is a versioned source_note authored org.xiangqi.native/v1; retain unknown annotations.
-Keep generated kernel.inc synchronized with kernel.js.
-Native app --smoke-test writes result.json and native-preview.png under its output directory/smoke and exits.
-Use scripts/setup-engine.ps1 to fetch the pinned official native engine and NNUE; retain accompanying licenses.
-
-## Task continuity
-
-Record achieved milestones, validation results and actual missing features in docs/PROGRESS.md.
-Do not claim feature parity until the feature matrix and original regression tests pass.
+Node metadata is a versioned source_note authored org.xiangqi.native/v1; retain unknown annotations.
+Native app --smoke-test verifies button-driven board moves, OXQ save/reopen, texture selection, flip, and native rendering.
+Use scripts/smoke.ps1 and scripts/setup-engine.ps1. Keep engine and network licenses.
+Do not claim complete feature parity; record verified work and actual remaining features in docs/PROGRESS.md.

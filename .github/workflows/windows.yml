@@ -5,22 +5,15 @@ on:
 jobs:
   native:
     runs-on: windows-2025
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm run kernel:build
-      - run: git diff --exit-code -- kernel/generated
-      - run: npm run kernel:test
-      - run: npm run upstream:test
       - shell: pwsh
-        run: ./scripts/build.ps1 -Configuration Release
+        run: ./scripts/build.ps1 -Configuration ${{ matrix.configuration }}
       - uses: actions/upload-artifact@v4
+        if: matrix.configuration == 'Release'
         with:
           name: XiangqiNative-win-x64
           path: build/winui/Release

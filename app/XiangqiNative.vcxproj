@@ -49,10 +49,26 @@
   </ClCompile>
   <Link>
    <SubSystem>Windows</SubSystem><GenerateWindowsMetadata>false</GenerateWindowsMetadata>
-   <AdditionalDependencies>$(ProjectDir)..\build\native\$(Configuration)\xiangqi_core.lib;$(ProjectDir)..\build\native\external\quickjs\$(Configuration)\qjs.lib;$(ProjectDir)..\build\native\external\oxqf\src\core\$(Configuration)\oxq-core.lib;$(ProjectDir)..\build\native\external\oxqf\src\convert\$(Configuration)\oxq-convert.lib;windowsapp.lib;comdlg32.lib;ole32.lib;shell32.lib;shlwapi.lib;bcrypt.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+   <AdditionalDependencies>$(ProjectDir)..\build\native\$(Configuration)\xiangqi_core.lib;$(ProjectDir)..\build\native\external\oxqf\src\core\$(Configuration)\oxq-core.lib;$(ProjectDir)..\build\native\external\oxqf\src\convert\$(Configuration)\oxq-convert.lib;windowsapp.lib;comdlg32.lib;ole32.lib;shell32.lib;shlwapi.lib;bcrypt.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
   </Link>
   <Manifest><AdditionalManifestFiles>app.manifest</AdditionalManifestFiles></Manifest>
  </ItemDefinitionGroup>
  <ItemGroup><ClCompile Include="main.cpp" /><Reference Include="$(ProjectDir)..\.packages\nuget\microsoft.web.webview2\1.0.3179.45\lib\Microsoft.Web.WebView2.Core.winmd" /></ItemGroup>
+ <Target Name="CopyOriginalAssets" AfterTargets="Build">
+  <ItemGroup><OriginalAsset Include="$(ProjectDir)..\assets\**\*" /></ItemGroup>
+  <Copy SourceFiles="@(OriginalAsset)" DestinationFiles="@(OriginalAsset->'$(OutDir)assets\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+ </Target>
+ <Target Name="CopyLicenseNotices" AfterTargets="Build">
+  <ItemGroup>
+   <NoticeFile Include="$(ProjectDir)..\LICENSE"><TargetPath>LICENSE</TargetPath></NoticeFile>
+   <NoticeFile Include="$(ProjectDir)..\licenses\xiangqi.js-LICENSE"><TargetPath>licenses\xiangqi.js-LICENSE</TargetPath></NoticeFile>
+   <NoticeFile Include="$(ProjectDir)..\external\oxqf\LICENSE"><TargetPath>licenses\OXQF-MIT.txt</TargetPath></NoticeFile>
+   <NoticeFile Include="$(ProjectDir)..\external\json\LICENSE.MIT"><TargetPath>licenses\nlohmann-json-MIT.txt</TargetPath></NoticeFile>
+   <NoticeFile Include="$(ProjectDir)..\docs\DEPENDENCIES.md"><TargetPath>THIRD-PARTY-NOTICES.md</TargetPath></NoticeFile>
+   <NoticeFile Include="$(ProjectDir)..\.packages\nuget\microsoft.windowsappsdk.winui\1.8.260803003\license.txt"><TargetPath>licenses\WindowsAppSDK-license.txt</TargetPath></NoticeFile>
+   <NoticeFile Include="$(ProjectDir)..\.packages\nuget\microsoft.windowsappsdk.winui\1.8.260803003\NOTICE.txt"><TargetPath>licenses\WindowsAppSDK-NOTICE.txt</TargetPath></NoticeFile>
+  </ItemGroup>
+  <Copy SourceFiles="@(NoticeFile)" DestinationFiles="@(NoticeFile->'$(OutDir)%(TargetPath)')" SkipUnchangedFiles="true" />
+ </Target>
  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

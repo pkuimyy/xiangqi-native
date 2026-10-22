@@ -1,44 +1,49 @@
-# Native document and compatibility kernel
+# Native application architecture
 
-## Boundaries
+## Calculation and document authority
 
-The WinUI application owns a Kernel and a collection of Documents. All document and kernel operations stay on the UI thread in this prototype. UCI processes run on a background worker with isolated request data; generation and document/node identity checks discard stale results.
+All application and calculation code is C++20. There is no JavaScript engine, generated JS bundle, Node build step, browser UI or Obsidian dependency.
 
-Document owns the authoritative OXQF GameModel. The cache contains only derived FENs, notation and layout. Native edit commands change the model; undo/redo stores bounded snapshots (100 states). This first implementation favors correctness over large-library efficiency.
+Kernel retains its existing JSON-in/JSON-out C++ interface to keep document projections stable. Its operations dispatch directly to native Position, PGN and Walker layout functions. Rules and notation were ported from the original locked @weshell/xiangqi.js 1.0.3. PGN, comment metadata and layout preserve the original application's conventions.
 
-The embedded QuickJS-NG interpreter executes the exact locked xiangqi.js package and copied pure application modules. The bridge exposes a JSON-in/JSON-out dispatcher: initial, position, move, parse, hydrate, layout and stringify. It does not expose eval to user input, host files, networking, DOM, Obsidian or Node APIs. Runtime memory is bounded to 256 MiB with an operation deadline of 30 seconds; this is not a GUI responsiveness guarantee.
+Position uses 90 squares, rank * 9 + file, rank 0 at Red's baseline. FEN validation includes palace advisor points, elephant points and facing generals. Legal moves check horse legs, elephant eyes, cannon screens, crossed-river pawns, self-check and flying generals. No-move positions retain the legacy checkmate=true/stalemate=false API; the UI uses check to distinguish checkmate and stalemate. Long-check/long-chase competition adjudication is not implemented by this migration.
 
-The compiled source array is included in the executable. Node and esbuild are build/test tools only.
+Chinese input is resolved against generated legal moves. This also fixes the old permissive parser's retreat-sign ambiguity; generated retreat notation now executes the corresponding retreat. Chinese aliases, fullwidth numbers, WXF and ICCS are supported.
+
+Document owns the authoritative OXQF GameModel. FEN, notation and coordinates are derived caches. Undo/redo holds up to 100 model snapshots. Document operations and full tree projections currently run on the UI thread.
+
+## Native visuals
+
+The original wood.jpg and bamboo.jpg are copied unchanged. Native BitmapImage/ImageBrush loads them through app resource URIs. The original SVG board paths are retained for wood with an explicit palette; river lettering uses a native TextBlock. Bamboo is an unchanged complete board image, so it uses its own grid/river artwork with calibrated native piece coordinates.
+
+WinUI's SVG image decoder does not render SVG text. Each original traditional piece SVG is therefore read using the Windows XML DOM: its circles, radii, stroke widths, colors, text, font size and bold weight define native Ellipse/TextBlock controls. Rendering remains vector based. Missing piece assets fail startup visibly instead of silently substituting different graphics.
+
+Native Button controls supply focus, input and accessibility names; the compact branch tree and two-column move list also use Buttons. Viewbox scales the board; evaluation-strip proportions reflect the original winning-chance mapping. There is no HTML/CSS layout.
 
 ## Persistent metadata
 
-OXQF GameModel is serialized with its public writer and read with its public reader. Initial position and moves use OXQ square coordinates (rank \* 9 + file, rank 0 at Red's baseline).
+Game headers are JSON text in metadata.extensions under org.xiangqi.native/pgn_headers. Native node metadata uses a source_note annotation with author org.xiangqi.native/v1 and text {"version":1,"data":{...}}.
 
-Original PGN headers are kept in metadata.extensions under namespace org.xiangqi.native, key pgn_headers. The value is a JSON string, compatible with OXQ's restricted string-valued metadata schema.
+Fields include eval, glyph, annotations, shapes, clock, commentAuthors and per-branch result. Human comments remain separate comment annotations. Unknown OXQ annotations are retained when editing/saving. Metadata follows its node through branch moves; it does not depend on session-local NodeId values.
 
-Application node metadata is a source_note annotation with:
+PGN follows the original fidelity limits: evaluation depth/MultiPV are retained in OXQ, while PGN preserves score, bestmove and ponder through compatible tags. Header strings are now correctly escaped/unescaped. Recognized semicolon comments and Chinese/WXF PGN input extend the original parser.
 
-- author: org.xiangqi.native/v1
-- text: a JSON object with version equal to 1 and data containing original node fields.
+## Files and bounds
 
-The data fields include eval, glyph, annotations, shapes, clock, commentAuthors and per-branch result. Human comments remain comment annotations. Unknown unrelated OXQ annotations remain in the model when editing and saving.
+Windows saves write a sibling temporary file exclusively, flush it, then use ReplaceFileW or MoveFileExW. Failed writes retain the original target. Files have a 256 MiB limit. Input warnings reject a PGN load, preserving the current document.
 
-This avoids attaching persistent data to NodeId, which the OXQ reader reconstructs from file indices. Moving/reordering branches preserves metadata because it moves with its node.
+Native tree hydration rejects duplicates, cycles, shared children and orphans, with a 100,000-node limit. PGN variation nesting is bounded at 512 and layout/export depth at 2048. Layout and export use explicit traversal stacks; a 2048-ply replay/export regression verifies the supported depth without recursive Windows call-stack growth. These bounds do not imply large-tree UI responsiveness: projections are currently complete recomputations.
 
-PGN serialization retains the original application's conventions and their original fidelity limits. OXQ preserves the richer native evaluation record, including depth and MultiPV.
+Opened multi-game PGNs produce independent Documents. OXQ save and PGN export act on the active game. CBL input currently rejects conversion diagnostics; collection export and diagnostics review are future work.
 
-## Saving and imports
+## UCI
 
-Windows saving uses a sibling file created exclusively, complete writes, FlushFileBuffers, then ReplaceFileW for an existing target or MoveFileExW for a new target. A failed replacement removes the temporary file and reports failure. External modification conflict detection, history backups and crash recovery are future work.
+CreateProcessW starts the native engine without a shell or visible console. Explicit pipe inheritance, uci/isready handshakes, exact-score filtering, cancellation, timeout and session retirement are native C++.
 
-Input files have an application-level 256 MiB limit. PGN warnings reject the load rather than silently saving a truncated game. CBL input currently rejects conversion diagnostics; an explicit report/review UI is planned.
+Scores are converted to Red's viewpoint. A generation token plus document/node identity prevents stale analysis from editing another position. Current analysis is FEN-based; preserving game history for repetition context, batch analysis and play against the engine remain future work.
 
-An opened multi-game PGN is a collection of independent Documents. The UI saves the active game as OXQ and exports its PGN. A complete multi-game collection export and manifest are planned.
+## Tests
 
-## UCI service
+Native CTest covers document edits/save, UCI protocol and deterministic migration fixtures. The golden JSON was generated from the pinned original implementation before removing JS. It compares legal move sets, Chinese notation, resulting FENs, checks, PGN trees/metadata/stringification and Walker coordinates.
 
-CreateProcessW launches the selected executable directly without a shell or a visible console. Inherited pipe handles are explicitly limited. UCI initialization and isready handshakes precede analysis; exact scores exclude bound values. Cancellation sends stop and drains bestmove before reuse; timeout/process failure retires the session.
-
-Native engine scores are converted to Red's viewpoint before being stored, matching EngineModule.toWhiteView in the original application. Opening another node or game invalidates the request generation, so a late result cannot modify the wrong position.
-
-The current API analyzes a FEN. Preserving move history for engine repetition context, automatic/batch analysis and engine-vs-human play remain follow-up work.
+The WinUI smoke test invokes board Buttons through their own automation peers, saves/reopens OXQ, switches native texture controls, flips the board and captures its own visual tree. It does not automate unrelated applications.

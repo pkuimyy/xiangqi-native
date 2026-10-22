@@ -1,80 +1,88 @@
-#include <chrono>
-#include <quickjs.h>
+#include "rules.hpp"
 #include <stdexcept>
-#include <xiangqi/kernel.hpp>
+#include <unordered_map>
+#include <unordered_set>
 namespace xqn {
-struct Kernel::Impl {
-    JSRuntime *runtime{};
-    JSContext *context{};
-    std::chrono::steady_clock::time_point deadline;
-    static int interrupt(JSRuntime *, void *opaque) {
-        return std::chrono::steady_clock::now() > static_cast<Impl *>(opaque)->deadline;
+struct Kernel::Impl {};
+Kernel::Kernel() : impl_(std::make_unique<Impl>()) {}
+Kernel::~Kernel() = default;
+Json Kernel::call(const std::string &op, const Json &data) {
+    using namespace native;
+    if (op == "initial")
+        return {{"fen", initial_fen}};
+    if (op == "position")
+        return Position(data.at("fen")).view();
+    if (op == "move") {
+        Position p(data.at("fen"));
+        auto m = data.contains("notation") ? p.parse(data.at("notation"))
+                                           : p.parse(square(data.at("from")) + square(data.at("to")));
+        auto move = p.describe(m);
+        p.apply(m);
+        Json result = nullptr;
+        if (p.moves().empty())
+            result = p.red ? "0-1" : "1-0";
+        return {{"fen", p.fen()}, {"move", move}, {"check", p.check(p.red)}, {"result", result}};
     }
-    std::string exception() {
-        JSValue e = JS_GetException(context);
-        const char *s = JS_ToCString(context, e);
-        std::string result = s ? s : "JavaScript exception";
-        JS_FreeCString(context, s);
-        JS_FreeValue(context, e);
-        return result;
+    if (op == "parse")
+        return parse_pgn(data.at("pgn"));
+    if (op == "hydrate" || op == "layout") {
+        auto nodes = hydrate(data);
+        if (op == "layout")
+            layout(nodes);
+        return {{"nodes", nodes}};
     }
-};
-Kernel::Kernel() : impl_(std::make_unique<Impl>()) {
-    auto &p = *impl_;
-    p.runtime = JS_NewRuntime();
-    if (!p.runtime)
-        throw std::runtime_error("Cannot create rules runtime");
-    JS_SetMemoryLimit(p.runtime, 256U * 1024U * 1024U);
-    JS_SetMaxStackSize(p.runtime, 2U * 1024U * 1024U);
-    p.context = JS_NewContext(p.runtime);
-    if (!p.context) {
-        JS_FreeRuntime(p.runtime);
-        throw std::runtime_error("Cannot create rules context");
-    }
-    p.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    JS_SetInterruptHandler(p.runtime, Impl::interrupt, &p);
-    static constexpr unsigned char source[] = {
-#include "kernel.inc"
+    if (op == "stringify")
+        return stringify_pgn(data);
+    throw std::runtime_error("Unknown kernel operation: " + op);
+}
+namespace native {
+Json hydrate(const Json &data) {
+    std::unordered_map<std::string, Json> source;
+    for (auto &n : data.at("nodes"))
+        if (!source.emplace(n.at("id").get<std::string>(), n).second)
+            throw std::runtime_error("Duplicate tree node");
+    auto root = data.at("root").get<std::string>();
+    if (!source.contains(root))
+        throw std::runtime_error("Missing root");
+    Json nodes = Json::array();
+    std::unordered_set<std::string> visited;
+    struct Pending {
+        std::string id, parent, fen;
     };
-    JSValue v = JS_Eval(p.context, reinterpret_cast<const char *>(source), sizeof(source) - 1,
-                        "xiangqi-kernel.js", JS_EVAL_TYPE_GLOBAL);
-    if (JS_IsException(v)) {
-        auto message = p.exception();
-        JS_FreeContext(p.context);
-        JS_FreeRuntime(p.runtime);
-        throw std::runtime_error(message);
+    std::vector<Pending> stack = {{root, "", data.at("fen")}};
+    while (!stack.empty()) {
+        auto entry = stack.back();
+        stack.pop_back();
+        if (!visited.insert(entry.id).second)
+            throw std::runtime_error("Cyclic/shared tree node");
+        if (nodes.size() >= 100000)
+            throw std::runtime_error("Too many tree nodes");
+        auto n = source.at(entry.id);
+        Position p(entry.fen);
+        if (entry.id == root) {
+            n["move"] = nullptr;
+            n["parent"] = nullptr;
+        } else {
+            auto m = p.parse(square(n.at("move").at("from")) + square(n.at("move").at("to")));
+            n["move"] = p.describe(m);
+            p.apply(m);
+            n["parent"] = entry.parent;
+        }
+        n["fen"] = p.fen();
+        n["x"] = 0;
+        n["y"] = 0;
+        if (!n.contains("comments"))
+            n["comments"] = Json::array();
+        if (!n.contains("meta"))
+            n["meta"] = Json::object();
+        nodes.push_back(n);
+        auto &children = n.at("children");
+        for (auto i = children.rbegin(); i != children.rend(); ++i)
+            stack.push_back({i->get<std::string>(), entry.id, n.at("fen")});
     }
-    JS_FreeValue(p.context, v);
+    if (visited.size() != source.size())
+        throw std::runtime_error("Orphan tree node");
+    return nodes;
 }
-Kernel::~Kernel() {
-    if (impl_) {
-        JS_FreeContext(impl_->context);
-        JS_FreeRuntime(impl_->runtime);
-    }
-}
-Json Kernel::call(const std::string &operation, const Json &data) {
-    auto &p = *impl_;
-    p.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    auto text = Json{{"op", operation}, {"data", data}}.dump();
-    JSValue global = JS_GetGlobalObject(p.context);
-    JSValue kernel = JS_GetPropertyStr(p.context, global, "XiangqiKernel");
-    JSValue fn = JS_GetPropertyStr(p.context, kernel, "dispatch");
-    JSValue arg = JS_NewStringLen(p.context, text.data(), text.size());
-    JSValue result = JS_Call(p.context, fn, kernel, 1, &arg);
-    JS_FreeValue(p.context, arg);
-    JS_FreeValue(p.context, fn);
-    JS_FreeValue(p.context, kernel);
-    JS_FreeValue(p.context, global);
-    if (JS_IsException(result))
-        throw std::runtime_error(p.exception());
-    const char *encoded = JS_ToCString(p.context, result);
-    if (!encoded) {
-        JS_FreeValue(p.context, result);
-        throw std::runtime_error(p.exception());
-    }
-    std::string json = encoded;
-    JS_FreeCString(p.context, encoded);
-    JS_FreeValue(p.context, result);
-    return Json::parse(json);
-}
+} // namespace native
 } // namespace xqn

@@ -1,21 +1,28 @@
-# Dependency provenance
+# Dependency and asset provenance
 
-| Component                            | Pinned source                                                            | License                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| Original application pure algorithms | obsidian-xiangqi c6f2197, copied under kernel/upstream                   | GPL-3.0, repository LICENSE                                     |
-| Original rules and Chinese notation  | @weshell/xiangqi.js 1.0.3, exact package from original package-lock.json | BSD-2-Clause, reference/xiangqi.js/LICENSE                      |
-| OXQF codec and model                 | local OXQF 7d8a554, vendored under external/oxqf                         | MIT, external/oxqf/LICENSE                                      |
-| QuickJS-NG                           | v0.17.0, 6d46d07d04041b40f4f49eaa7fdebe44c314c699                        | MIT, external/quickjs/LICENSE                                   |
-| JSON for Modern C++                  | v3.12.0, vendored single header                                          | MIT, external/json/LICENSE.MIT                                  |
-| WinUI                                | Microsoft.WindowsAppSDK.WinUI 1.8.260803003 with NuGet lock              | Distributed under package license                               |
-| C++/WinRT                            | Microsoft.Windows.CppWinRT 2.0.250303.1                                  | Distributed under package license                               |
-| Native Pikafish                      | Pikafish-2026-09-06, optional download                                   | GPL-3.0, engine Copying.txt; NNUE-License.md applies to network |
+| Component | Pinned source | License |
+| --- | --- | --- |
+| Rules/FEN/Chinese notation C++ port | @weshell/xiangqi.js 1.0.3 from original package lock | BSD-2-Clause, licenses/xiangqi.js-LICENSE |
+| PGN/comment metadata/Walker C++ port | obsidian-xiangqi c6f2197 | GPL-3.0, repository LICENSE |
+| Textures, piece definitions, board geometry | obsidian-xiangqi c6f2197 | Original repository GPL-3.0 |
+| OXQF model and codecs | local OXQF 7d8a554, external/oxqf | MIT, external/oxqf/LICENSE |
+| JSON for Modern C++ | 3.12.0, vendored header | MIT, external/json/LICENSE.MIT |
+| WinUI | Microsoft.WindowsAppSDK.WinUI 1.8.260803003 | NuGet package license |
+| C++/WinRT | Microsoft.Windows.CppWinRT 2.0.250303.1 | NuGet package license |
+| Optional native Pikafish | Pikafish-2026-09-06 | GPL-3.0 Copying.txt; NNUE-License.md |
+
+Original application: https://github.com/west-shell/obsidian-xiangqi/tree/c6f2197
+
+Assets wood.jpg, bamboo.jpg and all 14 assets/pieces/traditional SVGs are copied unchanged. board-grid.svg derives from original src/chess.ts GRID_SVG: SVG text is moved to native TextBlock, CSS palette references become a fixed wood palette. The bamboo image already contains its grid and river text and is used without another grid overlay. No generated replacement artwork is used.
 
 Pikafish archive: https://github.com/official-pikafish/Pikafish/releases/download/Pikafish-2026-09-06/Pikafish.2026-09-06.7z
 
 SHA-256: 41952BBFE2520FACEB5902C69E6AB4845CC999841D2B49A95CC1BE7867A25E5B
 
-Source: https://github.com/official-pikafish/Pikafish/tree/Pikafish-2026-09-06
+Engine source: https://github.com/official-pikafish/Pikafish/tree/Pikafish-2026-09-06
 
-Build tools (Node/npm, esbuild, Vitest, Prettier) are development-only. Normal program startup does not load Node, Obsidian, a browser, or a system JavaScript runtime.
-Windows App SDK brings transitive WebView2 build metadata because its control library defines a WebView2 control; the application never instantiates that control. This metadata is not used as a UI host.
+All application algorithms, tests and UI are C++. QuickJS, Node/npm, esbuild and Vitest were removed from the source/build pipeline after the native port. The upstream behavior oracle is static JSON, not executable script.
+
+Windows App SDK supplies transitive WebView2 build metadata because the control library defines that control. This app creates no WebView2 instance and does not require a browser UI host.
+
+OXQF is vendored as a native library subset; upstream Node release and wrapper-test tooling is omitted. Library C++ sources and generated tables remain unchanged. See external/oxqf/VENDORED.md.
