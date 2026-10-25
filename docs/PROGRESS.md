@@ -53,6 +53,12 @@ Selected piece artwork scales by 10% around its centre, without moving the hit t
 
 The current application was rebuilt into build/winui/Release/XiangqiNative.exe using the default build command, without an output-directory override. All four native tests and the window smoke test passed from this exact directory, confirming the plain-only UI and 110% selected-piece scale.
 
+## Board flicker repair (2026-10-25)
+
+Replaced full-board Clear/recreation with app/board_view.hpp: five retained layers, 90 persistent input buttons, cached SVG piece visuals and cached grid/background resources. Moving pieces keep the same parent and only change coordinates. Captures hide their visuals; undo reuses them. Selection and legal hints update existing properties.
+
+Four native tests and the same-directory temporary UI verification passed. The UI checks retained button/grid/piece identity, moving-piece parent, constant 32-piece visual allocation, capture and undo, and selection/cancellation. Final replacement of the standard Release executable is waiting for the current running window to close.
+
 ## Next work
 
 1. Drag/drop moves, arrow/highlight editing, annotation toggles, result controls, branch folding and keyboard interaction coverage.

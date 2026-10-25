@@ -4,7 +4,7 @@ Independent Windows application. The user requires WinUI 3 native controls, C++ 
 
 ## Architecture
 
-- app/: programmatic C++/WinRT UI. No WebView host.
+- app/: programmatic C++/WinRT UI. No WebView host. app/board_view.hpp owns a retained board visual tree.
 - src/core/rules.cpp: native rules, FEN, Chinese/WXF/ICCS notation.
 - src/core/pgn.cpp: native PGN parser/stringifier and original comment metadata conventions.
 - src/core/layout.cpp: C++ port of the original Walker/Buchheim layout.
@@ -19,7 +19,7 @@ Independent Windows application. The user requires WinUI 3 native controls, C++ 
 Use PowerShell scripts/build.ps1 -Configuration Debug or Release; -CoreOnly skips WinUI.
 All future Release deliveries must use C:\Users\yy_1070\project\xiangqi-native\build\winui\Release\XiangqiNative.exe, with no version/feature suffix on the directory. Use scripts/build.ps1 -Configuration Release and scripts/smoke.ps1 -Configuration Release without -OutputDirectory unless the user explicitly requests otherwise. An executable lock is not a reason to create a suffixed Release directory. Preserve running windows and unsaved work.
 CMake generates build/native/winui/<Configuration>/NativeCore.props for the WinUI project. Never hardcode FetchContent header/library cache paths. Dependency BUILD_TESTING is OFF, so no upstream Node tooling is required.
-Board square buttons intentionally use a static native template with empty transitions. Moves update immediately, with only a thin destination outline and no origin fill or fade. Selected piece artwork scales to 110% around its centre with no selection border; suppress the previous-move outline on the selected square. Never expose custom board controls in the user interface.
+BoardView creates its five layers and 90 hit buttons once. Keep SVG piece visuals parented to their persistent piece layer; update position/visibility/scale only. Never clear the board or reload grid/piece sources on a move. Captured piece visuals remain cached for undo. Board square buttons intentionally use a static native template with empty transitions. Moves update immediately, with only a thin destination outline and no origin fill or fade. Selected piece artwork scales to 110% around its centre with no selection border; suppress the previous-move outline on the selected square. Never expose custom board controls in the user interface.
 All tests are native C++ and run through CTest. Do not introduce Node or JavaScript build steps.
 tests/fixtures/upstream-oracle.json records the original implementation before its removal. Do not rewrite expected output to conceal a regression.
 The legacy checkmate flag means no legal moves, including stalemate. The UI distinguishes the two using check.

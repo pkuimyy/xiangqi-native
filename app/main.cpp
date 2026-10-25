@@ -1,6 +1,7 @@
 #include <shobjidl.h>
 #include <windows.h>
 #undef GetCurrentTime
+#include "board_view.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -173,6 +174,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     Window window;
     Grid root;
     Canvas board;
+    std::unique_ptr<xqn::ui::BoardView> boardView;
     ControlTemplate squareTemplate{nullptr};
     Grid evaluationStrip;
     bool bamboo = false;
@@ -677,198 +679,39 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         status.Text(L"点击棋子选择，点击落点走子；点击分支树节点切换局面。");
     }
 
-    std::pair<double, double> point(int square) {
-        int f = square % 9, r = square / 9;
-        if (flipped) {
-            f = 8 - f;
-            r = 9 - r;
-        }
-        // Bamboo is a complete 537x600 board image, with its own grid.
-        if (bamboo)
-            return {450.0 * (32.0 + 58.875 * f) / 537.0, 500.0 * (32.0 + 59.222222 * (9 - r)) / 600.0};
-        return {25.0 + f * 50, 25.0 + (9 - r) * 50};
-    }
-    void arrow(int from, int to, SolidColorBrush color) {
-        auto a = point(from), b = point(to);
-        double dx = b.first - a.first, dy = b.second - a.second;
-        double length = std::sqrt(dx * dx + dy * dy);
-        if (length < 1)
-            return;
-        dx /= length;
-        dy /= length;
-        a.first += dx * 20;
-        a.second += dy * 20;
-        b.first -= dx * 13;
-        b.second -= dy * 13;
-        line(board, a.first, a.second, b.first, b.second, color, 5);
-        Microsoft::UI::Xaml::Shapes::Polygon head;
-        head.Points().Append(Windows::Foundation::Point{float(b.first), float(b.second)});
-        head.Points().Append(Windows::Foundation::Point{float(b.first - dx * 14 - dy * 7),
-                                                        float(b.second - dy * 14 + dx * 7)});
-        head.Points().Append(Windows::Foundation::Point{float(b.first - dx * 14 + dy * 7),
-                                                        float(b.second - dy * 14 - dx * 7)});
-        head.Fill(color);
-        head.IsHitTestVisible(false);
-        board.Children().Append(head);
-    }
-    void draw_annotations() {
-        auto square = [](const std::string &s) -> int {
-            if (s.size() != 2 || s[0] < 'a' || s[0] > 'i' || s[1] < '0' || s[1] > '9')
-                return -1;
-            return s[0] - 'a' + (s[1] - '0') * 9;
-        };
-        auto meta = doc().node(doc().current()).at("meta");
-        if (meta.contains("shapes"))
-            for (auto &shape : meta["shapes"]) {
-                int from = square(shape.value("orig", std::string{}));
-                if (from < 0)
-                    continue;
-                auto name = shape.value("brush", std::string("g"));
-                auto color = name == "r"   ? brush(192, 50, 50)
-                             : name == "y" ? brush(194, 153, 31)
-                             : name == "b" ? brush(61, 101, 190)
-                                           : brush(26, 134, 91);
-                color.Opacity(0.75);
-                if (shape.contains("dest")) {
-                    int to = square(shape.at("dest"));
-                    if (to >= 0)
-                        arrow(from, to, color);
-                } else {
-                    auto p = point(from);
-                    Microsoft::UI::Xaml::Shapes::Ellipse ring;
-                    ring.Width(42);
-                    ring.Height(42);
-                    ring.Stroke(color);
-                    ring.StrokeThickness(4);
-                    ring.IsHitTestVisible(false);
-                    Canvas::SetLeft(ring, p.first - 21);
-                    Canvas::SetTop(ring, p.second - 21);
-                    board.Children().Append(ring);
-                }
-            }
-        if (meta.contains("eval")) {
-            auto best = meta["eval"].value("bestmove", std::string{});
-            if (best.size() == 4) {
-                int from = square(best.substr(0, 2)), to = square(best.substr(2, 2));
-                if (from >= 0 && to >= 0)
-                    arrow(from, to, brush(32, 145, 95));
-            }
-        }
-    }
-
     void draw_board() {
-        board.Children().Clear();
-        auto pos = doc().position();
-        if (bamboo) {
-            ImageBrush texture;
-            texture.ImageSource(Microsoft::UI::Xaml::Media::Imaging::BitmapImage(
-                Windows::Foundation::Uri(L"ms-appx:///assets/bamboo.jpg")));
-            texture.Stretch(Stretch::Fill);
-            board.Background(texture);
-        } else
-            board.Background(brush(245, 246, 248));
-        if (!bamboo) {
-            Image grid;
-            grid.Width(450);
-            grid.Height(500);
-            grid.IsHitTestVisible(false);
-            grid.Source(Microsoft::UI::Xaml::Media::Imaging::SvgImageSource(
-                Windows::Foundation::Uri(L"ms-appx:///assets/board-grid.svg")));
-            board.Children().Append(grid);
-            label(board, L"楚 河", 72, 229, 28);
-            label(board, L"漢 界", 322, 229, 28);
-        }
-        auto legal = pos.at("moves");
-        std::unordered_set<int> destinations;
-        if (selected >= 0)
-            for (auto &m : legal)
-                if (m.at("from") == selected)
-                    destinations.insert(m.at("to").get<int>());
-        auto &current = doc().node(doc().current());
-        int lastTo = -1;
-        if (!current.at("move").is_null()) {
-            lastTo = current["move"]["to"];
-        }
-        std::array<char, 90> squares{};
-        std::istringstream input(pos.at("fen").get<std::string>());
-        std::string fen;
-        input >> fen;
-        int rank = 9, file = 0;
-        for (char c : fen) {
-            if (c == '/') {
-                --rank;
-                file = 0;
-            } else if (c >= '1' && c <= '9')
-                file += c - '0';
-            else
-                squares.at(rank * 9 + file++) = c;
-        }
-        for (int s = 0; s < 90; s++) {
-            auto p = point(s);
-            Button b;
-            b.Template(squareTemplate);
-            b.UseSystemFocusVisuals(true);
-            b.Transitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
-            b.ContentTransitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
-            b.Width(48);
-            b.Height(48);
-            b.Padding(Thickness{0});
-            b.CornerRadius(CornerRadius{24});
-            b.Background(SolidColorBrush(Color{0, 0, 0, 0}));
-            b.BorderThickness(Thickness{0});
-            b.HorizontalContentAlignment(HorizontalAlignment::Center);
-            b.VerticalContentAlignment(VerticalAlignment::Center);
-            if (s == lastTo && s != selected) {
-                b.BorderBrush(brush(126, 111, 161));
-                b.BorderThickness(Thickness{1.5});
-            }
-            if (squares[s])
-                b.Content(piece_visual(squares[s], s == selected));
-            else if (destinations.contains(s)) {
-                Microsoft::UI::Xaml::Shapes::Ellipse dot;
-                dot.Width(12);
-                dot.Height(12);
-                dot.Fill(brush(30, 120, 100));
-                dot.Opacity(.6);
-                b.Content(dot);
-            }
-            Automation::AutomationProperties::SetName(
-                b, (squares[s] ? hstring(piece_name(squares[s])) : hstring(L"空位")) + L" " +
-                       to_hstring(xqn_square(s)));
-            Canvas::SetLeft(b, p.first - 24);
-            Canvas::SetTop(b, p.second - 24);
-            b.Click([this, s](auto &&, auto &&) {
-                run([this, s] {
-                    if (selected == s) {
-                        selected = -1;
+        if (!boardView) {
+            boardView = std::make_unique<xqn::ui::BoardView>(
+                board, squareTemplate, [](char c) { return piece_visual(c); },
+                [](char c) { return hstring(piece_name(c)); },
+                [this](int s) {
+                    run([this, s] {
+                        if (selected == s) {
+                            selected = -1;
+                            draw_board();
+                            return;
+                        }
+                        auto position = doc().position();
+                        if (selected >= 0)
+                            for (auto &move : position.at("moves"))
+                                if (move.at("from") == selected && move.at("to") == s) {
+                                    navigate([this, s] { doc().play(selected, s); });
+                                    return;
+                                }
+                        selected = s;
                         draw_board();
-                        return;
-                    }
-                    auto position = doc().position();
-                    if (selected >= 0)
-                        for (auto &m : position.at("moves"))
-                            if (m.at("from") == selected && m.at("to") == s) {
-                                navigate([this, s] { doc().play(selected, s); });
-                                return;
-                            }
-                    selected = s;
-                    draw_board();
+                    });
                 });
-            });
-            board.Children().Append(b);
         }
-        draw_annotations();
-        const std::wstring numbers = L"九八七六五四三二一";
-        for (int f = 0; f < 9; f++) {
-            label(board, std::to_wstring(flipped ? 9 - f : f + 1), 20 + f * 50, 0, 12);
-            label(board, std::wstring(1, numbers[flipped ? 8 - f : f]), 19 + f * 50, 481, 12);
-        }
+        auto pos = doc().position();
+        boardView->render(pos, doc().node(doc().current()), selected, flipped, bamboo);
         turn.Text(pos.at("turn") == "w" ? L"红方行棋" : L"黑方行棋");
         if (pos.at("checkmate") == true)
             turn.Text(pos.at("check") == true ? L"将死 · 对局结束" : L"困毙 · 对局结束");
         else if (pos.at("check") == true)
             turn.Text(turn.Text() + L" · 将军");
     }
+
     static std::string xqn_square(int s) { return std::string(1, char('a' + s % 9)) + char('0' + s / 9); }
 
     void draw_graph() {
@@ -1069,17 +912,8 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     }
     void invoke_square(int square) {
         using namespace Microsoft::UI::Xaml::Automation;
-        auto suffix = L" " + std::wstring(to_hstring(xqn_square(square)));
-        for (auto child : board.Children())
-            if (auto control = child.try_as<Button>()) {
-                auto name = std::wstring(AutomationProperties::GetName(control));
-                if (name.ends_with(suffix)) {
-                    Peers::ButtonAutomationPeer peer(control);
-                    peer.GetPattern(Peers::PatternInterface::Invoke).as<Provider::IInvokeProvider>().Invoke();
-                    return;
-                }
-            }
-        throw std::runtime_error("Board square button missing");
+        Peers::ButtonAutomationPeer peer(boardView->square(square));
+        peer.GetPattern(Peers::PatternInterface::Invoke).as<Provider::IInvokeProvider>().Invoke();
     }
 
     fire_and_forget smoke_test() {
@@ -1098,22 +932,38 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             doc().next();
             refresh_games();
             refresh();
-            if (board.Children().Size() < 90 || graph.Children().Size() < 7)
+            if (boardView->square_count() != 90 || graph.Children().Size() < 7)
                 throw std::runtime_error("Native controls did not populate");
             co_await winrt::resume_after(std::chrono::milliseconds(100));
             co_await ui;
+            auto stableButton = boardView->square(0);
+            auto stableGrid = boardView->grid_image();
+            auto stableRook = boardView->piece(0);
+            auto movingCannon = boardView->piece(70);
+            auto movingParent = movingCannon.Parent();
+            auto visualCount = boardView->piece_visual_count();
+            auto verifyRetained = [&] {
+                if (boardView->square(0) != stableButton || boardView->grid_image() != stableGrid ||
+                    boardView->piece(0) != stableRook || boardView->piece_visual_count() != visualCount)
+                    throw std::runtime_error("Board visuals were rebuilt during interaction");
+            };
+
             auto beforeClick = doc().current();
             invoke_square(70);
             co_await winrt::resume_after(std::chrono::milliseconds(30));
             co_await ui;
             if (selected != 70)
                 throw std::runtime_error("Board source click failed");
+            verifyRetained();
+            if (boardView->piece(70) != movingCannon)
+                throw std::runtime_error("Selection rebuilt its SVG");
             co_await capture_preview(directory / L"selected-preview.png");
             invoke_square(70);
             co_await winrt::resume_after(std::chrono::milliseconds(30));
             co_await ui;
             if (selected != -1)
                 throw std::runtime_error("Board selection did not clear");
+            verifyRetained();
             co_await capture_preview(directory / L"deselected-preview.png");
             invoke_square(70);
             co_await winrt::resume_after(std::chrono::milliseconds(30));
@@ -1123,8 +973,24 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             co_await ui;
             if (doc().current() == beforeClick || doc().node(doc().current()).at("move").at("lan") != "h7e7")
                 throw std::runtime_error("Board destination click failed");
+            verifyRetained();
+            if (boardView->piece(67) != movingCannon || boardView->piece(70) ||
+                movingCannon.Parent() != movingParent)
+                throw std::runtime_error("Moved SVG visual was not reused");
             doc().select(beforeClick);
             refresh();
+            auto capturingCannon = boardView->piece(64);
+            auto capturedHorse = boardView->piece(1);
+            navigate([this] { doc().play(64, 1); });
+            if (boardView->piece(1) != capturingCannon || boardView->piece(64))
+                throw std::runtime_error("Capture did not reuse its SVG visual");
+            navigate([this] {
+                if (!doc().undo())
+                    throw std::runtime_error("Capture undo failed");
+            });
+            if (boardView->piece(1) != capturedHorse || boardView->piece(64) != capturingCannon)
+                throw std::runtime_error("Captured SVG was not retained for undo");
+            verifyRetained();
 
             const auto file = directory / L"原生往返.oxq";
             xqn::save_atomic(file, doc().oxq());
@@ -1152,7 +1018,10 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
 
             xqn::save_atomic(directory / L"result.json",
                              bytes(xqn::Json{{"passed", true},
-                                             {"boardControls", board.Children().Size()},
+                                             {"boardControls", boardView->square_count()},
+                                             {"boardLayers", boardView->layer_count()},
+                                             {"retainedBoard", true},
+                                             {"pieceVisuals", visualCount},
                                              {"graphControls", graph.Children().Size()},
                                              {"gameNodes", doc().model().move_tree.nodes.size()},
                                              {"preview", "native-preview.png"},

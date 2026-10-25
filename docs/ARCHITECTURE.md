@@ -26,6 +26,16 @@ The 14 OXDF-editor SVG pieces are copied unchanged from the user's selected dire
 
 Chess-square Button controls use a static ContentPresenter template with empty control/content/children transitions. Position updates are immediate. Only the unselected last destination has a thin outline; there is no origin fill, tween, fade or hover/press backdrop. Selected piece artwork uses a centred 1.10 ScaleTransform, without changing the hit area or layout position. Selection has no separate outline, and cancelling selection restores the original size. System keyboard focus visuals are retained. Native Button controls supply focus, input and accessibility names; the compact branch tree and two-column move list also use Buttons. Viewbox scales the board; evaluation-strip proportions reflect the original winning-chance mapping. There is no HTML/CSS layout.
 
+### Retained board rendering
+
+app/board_view.hpp keeps five layers: background/grid, 90 input buttons, piece visuals, legal destinations and annotations. Normal moves never clear the board subtree. The grid source, labels, buttons, hint dots and standard game's 32 SVG piece objects are allocated once.
+
+Position differences update only changed square ownership and accessibility names. A moving piece stays attached to the same piece layer; only its Canvas coordinates change. Captures collapse the existing visual and undo reuses it. Selection updates the existing centred scale transform, without replacing the Image or its Source.
+
+Background resources change only when the internal board style changes. Orientation changes update coordinates and coordinate labels. Annotation children rebuild only when shape/best-move metadata or orientation changes; other board layers remain connected.
+
+The window smoke test verifies stable grid/button/unchanged-piece identities, the moving piece's identity and parent, stable allocation counts, capture and undo, selection and cancellation. This guards against the original whole-board teardown and asynchronous SVG reload path. Full model projection and sidebar graph rebuilds remain separate performance work.
+
 ## Persistent metadata
 
 Game headers are JSON text in metadata.extensions under org.xiangqi.native/pgn_headers. Native node metadata uses a source_note annotation with author org.xiangqi.native/v1 and text {"version":1,"data":{...}}.
