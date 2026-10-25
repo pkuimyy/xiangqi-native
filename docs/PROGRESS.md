@@ -77,7 +77,7 @@ Release verification passed and both orientation screenshots were inspected. The
 
 Repurposed the left strip from evaluation proportions to the current side to move. A single fixed half-height indicator uses the piece colours (#BC3328 Red, #333333 Black); the other half is neutral. Normal orientation shows Red below/Black above, and both retained flip controls swap the position. draw_board updates it from the position turn, independent of engine metadata; the tooltip/accessibility name identifies the side. Numeric engine evaluations remain available separately.
 
-The UI regression checks both colours in both orientations, fixed row heights despite stored +0.35 evaluation metadata, moves/capture, navigation and undo. The Release verification executable passed the actual WinUI smoke test and its normal/flipped Red/Black screenshots were inspected. Standard deployment is waiting for the running window to close.
+The UI regression checks both colours in both orientations, fixed row heights despite stored +0.35 evaluation metadata, moves/capture, navigation and undo. The Release verification executable and the rebuilt standard build/winui/Release/XiangqiNative.exe both passed the actual WinUI smoke test (turnIndicator=true). Normal/flipped Red/Black screenshots were inspected.
 
 ## Next work
 
