@@ -977,6 +977,29 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             if (boardView->piece(67) != movingCannon || boardView->piece(70) ||
                 movingCannon.Parent() != movingParent)
                 throw std::runtime_error("Moved SVG visual was not reused");
+            if (boardView->last_move_visibility() != Visibility::Visible)
+                throw std::runtime_error("Last-move marker missing after move");
+            for (int repeat = 0; repeat < 2; ++repeat) {
+                boardView->square(67).Focus(FocusState::Pointer);
+                invoke_square(67);
+                co_await winrt::resume_after(std::chrono::milliseconds(30));
+                co_await ui;
+                auto border = boardView->square(67).BorderThickness();
+                if (selected != 67 || boardView->last_move_visibility() != Visibility::Collapsed ||
+                    border.Left || border.Top || border.Right || border.Bottom ||
+                    boardView->square(67).Shadow())
+                    throw std::runtime_error("Recently moved selection retained a decoration");
+                verifyRetained();
+                if (boardView->piece(67) != movingCannon || movingCannon.Parent() != movingParent)
+                    throw std::runtime_error("Recently moved selection rebuilt its piece");
+                if (repeat == 0)
+                    co_await capture_preview(directory / L"recent-move-selected-preview.png");
+                invoke_square(67);
+                co_await winrt::resume_after(std::chrono::milliseconds(30));
+                co_await ui;
+                if (selected != -1 || boardView->last_move_visibility() != Visibility::Visible)
+                    throw std::runtime_error("Last-move marker not restored after deselection");
+            }
             doc().select(beforeClick);
             refresh();
             auto capturingCannon = boardView->piece(64);
@@ -1029,6 +1052,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                                              {"pieceResources", loadedPieceArt.size()},
                                              {"visibleBoardStyles", 1},
                                              {"internalBoardStylesTested", 2},
+                                             {"recentMoveSelection", true},
                                              {"selectionScale", 1.10}}
                                        .dump(2)));
         } catch (const hresult_error &e) {

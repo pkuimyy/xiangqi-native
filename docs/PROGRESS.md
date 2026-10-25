@@ -59,6 +59,12 @@ Replaced full-board Clear/recreation with app/board_view.hpp: five retained laye
 
 Four native tests and the same-directory temporary UI verification passed. The UI checks retained button/grid/piece identity, moving-piece parent, constant 32-piece visual allocation, capture and undo, and selection/cancellation. The standard build/winui/Release/XiangqiNative.exe has now been rebuilt and passed the same window checks after the previous window was closed.
 
+## Recently moved selection repair (2026-10-25)
+
+The last-destination outline now belongs to a dedicated noninteractive ellipse in the retained hints layer. Selecting that piece collapses the outline; input buttons keep zero borders and no shadow. The selected SVG still scales in place to 110%, with no visual-tree rebuild.
+
+Added a regression that moves a cannon, gives its destination pointer focus, selects/deselects it twice, and checks marker visibility, zero button border/shadow and retained piece identity. The Release verification executable passed the actual WinUI smoke flow; the captured recent-move-selected-preview.png confirms no surrounding outline. Standard executable deployment is waiting for the running window to close.
+
 ## Next work
 
 1. Drag/drop moves, arrow/highlight editing, annotation toggles, result controls, branch folding and keyboard interaction coverage.

@@ -72,7 +72,7 @@ class BoardView {
             b.CornerRadius(xaml::CornerRadius{24});
             b.Background(color(0, 0, 0, 0));
             b.BorderThickness(xaml::Thickness{0});
-            b.BorderBrush(color(126, 111, 161));
+            b.Shadow(nullptr);
             b.HorizontalContentAlignment(xaml::HorizontalAlignment::Center);
             b.VerticalContentAlignment(xaml::VerticalAlignment::Center);
             b.Click([click, s](auto &&, auto &&) { click(s); });
@@ -87,6 +87,14 @@ class BoardView {
             hints_.Children().Append(dot);
             dots_.push_back(dot);
         }
+        // Last-move decoration is separate from hit buttons and selected artwork.
+        lastMove_.Width(48);
+        lastMove_.Height(48);
+        lastMove_.Fill(nullptr);
+        lastMove_.Stroke(color(126, 111, 161));
+        lastMove_.StrokeThickness(1.5);
+        lastMove_.Visibility(xaml::Visibility::Collapsed);
+        hints_.Children().Append(lastMove_);
     }
 
     void render(Json const &position, Json const &node, int selected, bool flipped, bool bamboo) {
@@ -153,11 +161,6 @@ class BoardView {
                     legal.at(move.at("to").get<int>()) = true;
         int last = node.at("move").is_null() ? -1 : node.at("move").at("to").get<int>();
         for (int s = 0; s < 90; ++s) {
-            bool mark = s == last && s != selected;
-            if (mark != marked_[s]) {
-                buttons_[s].BorderThickness(xaml::Thickness{mark ? 1.5 : 0.0});
-                marked_[s] = mark;
-            }
             bool hint = legal[s] && !next[s];
             if (hint != hinted_[s]) {
                 dots_[s].Visibility(hint ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
@@ -165,6 +168,14 @@ class BoardView {
             }
         }
 
+        if (last >= 0 && (last != lastMoveSquare_ || geometryChanged)) {
+            auto p = point(last, flipped, bamboo);
+            controls::Canvas::SetLeft(lastMove_, p.first - 24);
+            controls::Canvas::SetTop(lastMove_, p.second - 24);
+        }
+        lastMoveSquare_ = last;
+        lastMove_.Visibility(last >= 0 && last != selected ? xaml::Visibility::Visible
+                                                           : xaml::Visibility::Collapsed);
         const auto &meta = node.at("meta");
         auto shapes = meta.value("shapes", Json::array());
         auto best = meta.contains("eval") ? meta["eval"].value("bestmove", std::string{}) : std::string{};
@@ -184,6 +195,7 @@ class BoardView {
         int index = pieceAt_.at(s);
         return index >= 0 ? pieces_[index].frame : controls::Canvas{nullptr};
     }
+    xaml::Visibility last_move_visibility() const { return lastMove_.Visibility(); }
     controls::Image grid_image() const { return grid_; }
     std::size_t square_count() const { return buttons_.size(); }
     std::size_t piece_visual_count() const { return pieces_.size(); }
@@ -209,7 +221,9 @@ class BoardView {
     PieceName pieceName_;
     std::array<char, 90> displayed_{};
     std::array<int, 90> pieceAt_;
-    std::array<bool, 90> marked_{}, hinted_{};
+    std::array<bool, 90> hinted_{};
+    drawing::Ellipse lastMove_;
+    int lastMoveSquare_ = -1;
     media::ImageBrush bambooBrush_{nullptr};
     bool ready_ = false, flipped_ = false, bamboo_ = false;
     std::string annotationKey_;

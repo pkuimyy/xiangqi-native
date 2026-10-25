@@ -24,7 +24,7 @@ The user interface provides only the plain board with a flat native brush and ne
 
 The 14 OXDF-editor SVG pieces are copied unchanged from the user's selected directory. Their glyphs are paths, so WinUI SvgImageSource renders them directly instead of reconstructing circles/text. A clipped native Canvas crops transparent outer margins from the 96x96 documents. Native load events verify all 14 resources decode successfully in the UI smoke test. Missing resource files fail startup explicitly.
 
-Chess-square Button controls use a static ContentPresenter template with empty control/content/children transitions. Position updates are immediate. Only the unselected last destination has a thin outline; there is no origin fill, tween, fade or hover/press backdrop. Selected piece artwork uses a centred 1.10 ScaleTransform, without changing the hit area or layout position. Selection has no separate outline, and cancelling selection restores the original size. System keyboard focus visuals are retained. Native Button controls supply focus, input and accessibility names; the compact branch tree and two-column move list also use Buttons. Viewbox scales the board; evaluation-strip proportions reflect the original winning-chance mapping. There is no HTML/CSS layout.
+Chess-square Button controls use a static ContentPresenter template with empty control/content/children transitions. Position updates are immediate. Only the unselected last destination has a thin outline rendered by a dedicated noninteractive ellipse in the hints layer; it is collapsed when that square is selected. Hit buttons always have zero border thickness and no shadow; there is no origin fill, tween, fade or hover/press backdrop. Selected piece artwork uses a centred 1.10 ScaleTransform, without changing the hit area or layout position. Selection has no separate outline, and cancelling selection restores the original size. System keyboard focus visuals are retained. Native Button controls supply focus, input and accessibility names; the compact branch tree and two-column move list also use Buttons. Viewbox scales the board; evaluation-strip proportions reflect the original winning-chance mapping. There is no HTML/CSS layout.
 
 ### Retained board rendering
 
@@ -34,7 +34,7 @@ Position differences update only changed square ownership and accessibility name
 
 Background resources change only when the internal board style changes. Orientation changes update coordinates and coordinate labels. Annotation children rebuild only when shape/best-move metadata or orientation changes; other board layers remain connected.
 
-The window smoke test verifies stable grid/button/unchanged-piece identities, the moving piece's identity and parent, stable allocation counts, capture and undo, selection and cancellation. This guards against the original whole-board teardown and asynchronous SVG reload path. Full model projection and sidebar graph rebuilds remain separate performance work.
+The window smoke test verifies stable grid/button/unchanged-piece identities, the moving piece's identity and parent, stable allocation counts, capture and undo, selection and cancellation, and repeated pointer-focused selection of the most recently moved piece with its destination marker hidden. This guards against the original whole-board teardown and asynchronous SVG reload path. Full model projection and sidebar graph rebuilds remain separate performance work.
 
 ## Persistent metadata
 
