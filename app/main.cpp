@@ -176,7 +176,8 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     Canvas board;
     std::unique_ptr<xqn::ui::BoardView> boardView;
     ControlTemplate squareTemplate{nullptr};
-    Grid evaluationStrip;
+    Grid turnStrip;
+    Border turnIndicator;
     bool bamboo = false;
     Canvas graph;
     StackPanel moveList;
@@ -409,21 +410,17 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         for (int i = 0; i < 2; i++) {
             RowDefinition r;
             r.Height(GridLength{1, GridUnitType::Star});
-            evaluationStrip.RowDefinitions().Append(r);
+            turnStrip.RowDefinitions().Append(r);
         }
-        Border blackFill;
-        blackFill.Background(brush(27, 35, 49));
-        evaluationStrip.Children().Append(blackFill);
-        Border redFill;
-        redFill.Background(brush(253, 248, 239));
-        Grid::SetRow(redFill, 1);
-        evaluationStrip.Children().Append(redFill);
-        Border evaluationCard;
-        evaluationCard.CornerRadius(CornerRadius{4});
-        evaluationCard.BorderBrush(brush(206, 210, 218));
-        evaluationCard.BorderThickness(Thickness{1});
-        evaluationCard.Child(evaluationStrip);
-        boardArea.Children().Append(evaluationCard);
+        turnIndicator.CornerRadius(CornerRadius{4});
+        turnStrip.Children().Append(turnIndicator);
+        Border turnCard;
+        turnCard.CornerRadius(CornerRadius{4});
+        turnCard.Background(brush(236, 239, 243));
+        turnCard.BorderBrush(brush(206, 210, 218));
+        turnCard.BorderThickness(Thickness{1});
+        turnCard.Child(turnStrip);
+        boardArea.Children().Append(turnCard);
         Border boardFrame;
         boardFrame.CornerRadius(CornerRadius{8});
         boardFrame.Child(view);
@@ -447,7 +444,6 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         railButton(Symbol::Refresh, L"翻转棋盘", [this] {
             flipped = !flipped;
             draw_board();
-            refresh_evaluation_strip();
         });
         railButton(Symbol::Undo, L"撤销", [this] { navigate([this] { doc().undo(); }); });
         railButton(Symbol::Redo, L"重做", [this] { navigate([this] { doc().redo(); }); });
@@ -617,31 +613,15 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         selected = -1;
         refresh();
     }
-    void refresh_evaluation_strip() {
-        double redShare = .5;
-        auto meta = doc().node(doc().current()).at("meta");
-        if (meta.contains("eval")) {
-            auto ev = meta["eval"];
-            int score = ev.value("score", 0);
-            redShare = ev.value("scoreType", std::string("cp")) == "mate"
-                           ? (score > 0   ? .99
-                              : score < 0 ? .01
-                                          : .5)
-                           : 1.0 / (1.0 + std::exp(-.00368208 * score));
-        }
-        redShare = (std::clamp)(redShare, .01, .99);
-        evaluationStrip.RowDefinitions().GetAt(0).Height(
-            GridLength{flipped ? redShare : 1 - redShare, GridUnitType::Star});
-        evaluationStrip.RowDefinitions().GetAt(1).Height(
-            GridLength{flipped ? 1 - redShare : redShare, GridUnitType::Star});
-        evaluationStrip.Children().GetAt(0).as<Border>().Background(flipped ? brush(253, 248, 239)
-                                                                            : brush(27, 35, 49));
-        evaluationStrip.Children().GetAt(1).as<Border>().Background(flipped ? brush(27, 35, 49)
-                                                                            : brush(253, 248, 239));
+    void refresh_turn_indicator(bool redToMove) {
+        Grid::SetRow(turnIndicator, redToMove != flipped ? 1 : 0);
+        turnIndicator.Background(redToMove ? brush(188, 51, 40) : brush(51, 51, 51));
+        auto name = redToMove ? L"红方行棋" : L"黑方行棋";
+        ToolTipService::SetToolTip(turnStrip, box_value(name));
+        Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(turnStrip, name);
     }
 
     void refresh() {
-        refresh_evaluation_strip();
         draw_board();
         draw_graph();
         std::wstring text;
@@ -705,7 +685,9 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         }
         auto pos = doc().position();
         boardView->render(pos, doc().node(doc().current()), selected, flipped, bamboo);
-        turn.Text(pos.at("turn") == "w" ? L"红方行棋" : L"黑方行棋");
+        bool redToMove = pos.at("turn") == "w";
+        refresh_turn_indicator(redToMove);
+        turn.Text(redToMove ? L"红方行棋" : L"黑方行棋");
         if (pos.at("checkmate") == true)
             turn.Text(pos.at("check") == true ? L"将死 · 对局结束" : L"困毙 · 对局结束");
         else if (pos.at("check") == true)
@@ -948,6 +930,18 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                     throw std::runtime_error("Board visuals were rebuilt during interaction");
             };
 
+            auto verifyTurnIndicator = [&](bool red, int row) {
+                auto ink = turnIndicator.Background().as<SolidColorBrush>().Color();
+                if (Grid::GetRow(turnIndicator) != row || ink.A != 255 || ink.R != (red ? 188 : 51) ||
+                    ink.G != 51 || ink.B != (red ? 40 : 51))
+                    throw std::runtime_error("Turn indicator colour or position is incorrect");
+                for (auto definition : turnStrip.RowDefinitions())
+                    if (definition.Height().GridUnitType != GridUnitType::Star ||
+                        definition.Height().Value != 1)
+                        throw std::runtime_error("Turn indicator depends on evaluation score");
+            };
+            verifyTurnIndicator(false, 0); // Black to move, despite the stored +0.35 evaluation.
+
             auto beforeClick = doc().current();
             invoke_square(70);
             co_await winrt::resume_after(std::chrono::milliseconds(30));
@@ -973,6 +967,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             co_await ui;
             if (doc().current() == beforeClick || doc().node(doc().current()).at("move").at("lan") != "h7e7")
                 throw std::runtime_error("Board destination click failed");
+            verifyTurnIndicator(true, 1);
             verifyRetained();
             if (boardView->piece(67) != movingCannon || boardView->piece(70) ||
                 movingCannon.Parent() != movingParent)
@@ -999,17 +994,20 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             }
             doc().select(beforeClick);
             refresh();
+            verifyTurnIndicator(false, 0);
             auto capturingCannon = boardView->piece(64);
             auto capturedHorse = boardView->piece(1);
             navigate([this] { doc().play(64, 1); });
             if (boardView->piece(1) != capturingCannon || boardView->piece(64))
                 throw std::runtime_error("Capture did not reuse its SVG visual");
+            verifyTurnIndicator(true, 1);
             navigate([this] {
                 if (!doc().undo())
                     throw std::runtime_error("Capture undo failed");
             });
             if (boardView->piece(1) != capturedHorse || boardView->piece(64) != capturingCannon)
                 throw std::runtime_error("Captured SVG was not retained for undo");
+            verifyTurnIndicator(false, 0);
             verifyRetained();
 
             const auto file = directory / L"原生往返.oxq";
@@ -1027,16 +1025,24 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             co_await capture_preview(directory / L"native-preview.png");
             flipped = true;
             draw_board();
-            refresh_evaluation_strip();
             co_await winrt::resume_after(std::chrono::milliseconds(300));
             co_await ui;
             verifyRetained();
             if (boardView->grid_image().Source().as<SvgImageSource>().UriSource().Path() !=
                 L"/assets/board-grid-flipped.svg")
                 throw std::runtime_error("Flipped SVG coordinates were not loaded");
+            verifyTurnIndicator(false, 1);
             co_await capture_preview(directory / L"flipped-preview.png");
+            navigate([this] { doc().next(); });
+            verifyTurnIndicator(true, 0);
+            co_await winrt::resume_after(std::chrono::milliseconds(30));
+            co_await ui;
+            co_await capture_preview(directory / L"flipped-red-turn-preview.png");
+            navigate([this, beforeClick] { doc().select(beforeClick); });
+            verifyTurnIndicator(false, 1);
             flipped = false;
             refresh();
+            verifyTurnIndicator(false, 0);
 
             xqn::save_atomic(directory / L"result.json",
                              bytes(xqn::Json{{"passed", true},
@@ -1052,6 +1058,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                                              {"visibleBoardStyles", 1},
                                              {"boardStylesTested", 1},
                                              {"lastMoveMarker", false},
+                                             {"turnIndicator", true},
                                              {"recentMoveSelection", true},
                                              {"selectionScale", 1.10}}
                                        .dump(2)));

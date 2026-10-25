@@ -9,7 +9,7 @@ Date: 2026-10-25. The current checkpoint implements the user's C++-only requirem
 - QuickJS, JS/TS sources, generated bundles, npm manifests and Node CI steps removed.
 - Only the flat native board is exposed to users; custom/bamboo rendering stays internal. All 14 OXDF-editor SVG pieces remain unchanged. Wood and old traditional piece assets are removed.
 - Native vector pieces, board click-to-move/flip, legal dots, annotations and best-move arrows; no automatic last-move marking.
-- WinUI native side toolbar, FEN copy, evaluation strip, compact branch graph and two-column Chinese move list.
+- WinUI native side toolbar, FEN copy, current-turn strip, compact branch graph and two-column Chinese move list.
 - Multiple games; navigation, branch deletion/promotion, comments, undo/redo.
 - OXQF authoritative model, fetched directly at 206f807 from pkuimyy/OXQF; rich metadata and unknown annotations preserved.
 - PGN import/export; Unicode paths, native file dialogs and atomic OXQ overwrite.
@@ -72,6 +72,12 @@ Combined the original grid, OXDF-editor river lettering paths and outlined file 
 Removed native river/coordinate TextBlocks and all automatic last-move decoration. Retained grid/piece/button identities and move/capture/undo behavior are unchanged. The UI smoke flow now exercises only the plain board, including flip and repeated selection of the recently moved piece; it no longer enters the bamboo theme.
 
 Release verification passed and both orientation screenshots were inspected. The standard build/winui/Release/XiangqiNative.exe was rebuilt after the running window closed and passed the same plain-board smoke flow (boardStylesTested=1, lastMoveMarker=false). Both SVGs' 36 coordinate and 4 river path bounds were independently checked to within 0.001px.
+
+## Current-turn strip (2026-10-25)
+
+Repurposed the left strip from evaluation proportions to the current side to move. A single fixed half-height indicator uses the piece colours (#BC3328 Red, #333333 Black); the other half is neutral. Normal orientation shows Red below/Black above, and both retained flip controls swap the position. draw_board updates it from the position turn, independent of engine metadata; the tooltip/accessibility name identifies the side. Numeric engine evaluations remain available separately.
+
+The UI regression checks both colours in both orientations, fixed row heights despite stored +0.35 evaluation metadata, moves/capture, navigation and undo. The Release verification executable passed the actual WinUI smoke test and its normal/flipped Red/Black screenshots were inspected. Standard deployment is waiting for the running window to close.
 
 ## Next work
 
