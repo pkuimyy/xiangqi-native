@@ -79,6 +79,12 @@ Repurposed the left strip from evaluation proportions to the current side to mov
 
 The UI regression checks both colours in both orientations, fixed row heights despite stored +0.35 evaluation metadata, moves/capture, navigation and undo. The Release verification executable and the rebuilt standard build/winui/Release/XiangqiNative.exe both passed the actual WinUI smoke test (turnIndicator=true). Normal/flipped Red/Black screenshots were inspected.
 
+## Half-screen layout preview (2026-10-26)
+
+Replaced the fixed 520px board column and always-visible study/engine controls with a provisional native WorkspaceLayout. File/Start/Analysis/View group the commands, navigation sits below the board, notation input and comments collapse, and moves/graph share a compact sidebar. Widths at or above 1120 effective pixels show graph in a third column; default startup targets half-screen use. Piece rendering, turn indication, document model and engine behavior are reused.
+
+The standard Release build succeeded. A lightweight --layout-preview startup renders 640x640, 768x720 and 1280x760 client areas and captures their actual WinUI content. The three actual rendered captures were inspected and saved as docs/assets/layout-{compact,half,wide}.png. Per user request, full CTest and functional smoke suites are deferred until the design is approved. This is a layout review checkpoint; panel sizes, spacing, movable dividers, saved preferences and visual polish remain open.
+
 ## Next work
 
 1. Drag/drop moves, arrow/highlight editing, annotation toggles, result controls, branch folding and keyboard interaction coverage.

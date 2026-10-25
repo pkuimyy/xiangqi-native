@@ -2,6 +2,7 @@
 #include <windows.h>
 #undef GetCurrentTime
 #include "board_view.hpp"
+#include "workspace_layout.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -175,6 +176,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     Grid root;
     Canvas board;
     std::unique_ptr<xqn::ui::BoardView> boardView;
+    std::unique_ptr<xqn::ui::WorkspaceLayout> shell;
     ControlTemplate squareTemplate{nullptr};
     Grid turnStrip;
     Border turnIndicator;
@@ -278,6 +280,100 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         } catch (...) {
         }
     }
+    void layout_command(xqn::ui::ShellCommand command) {
+        using C = xqn::ui::ShellCommand;
+        run([this, command] {
+            switch (command) {
+            case C::NewGame:
+                commit_comment();
+                cancel();
+                docs.emplace_back(kernel);
+                paths.emplace_back();
+                active = docs.size() - 1;
+                selected = -1;
+                refresh_games();
+                refresh();
+                break;
+            case C::Open:
+                open();
+                break;
+            case C::Save:
+                save();
+                break;
+            case C::Export: {
+                commit_comment();
+                auto file = picker(hwnd, true, L"*.pgn", L"pgn");
+                if (!file.empty())
+                    xqn::save_atomic(file, bytes(doc().pgn()));
+                break;
+            }
+            case C::Undo:
+                navigate([this] { doc().undo(); });
+                break;
+            case C::Redo:
+                navigate([this] { doc().redo(); });
+                break;
+            case C::First:
+                navigate([this] { doc().start(); });
+                break;
+            case C::Back:
+                navigate([this] { doc().back(); });
+                break;
+            case C::Next:
+                navigate([this] { doc().next(); });
+                break;
+            case C::Last:
+                navigate([this] { doc().end(); });
+                break;
+            case C::Promote:
+                navigate([this] { doc().promote_current(); });
+                break;
+            case C::Erase:
+                navigate([this] { doc().erase_current(); });
+                break;
+            case C::Flip:
+                flipped = !flipped;
+                draw_board();
+                break;
+            case C::Play: {
+                auto move = kernel.call("move", {{"fen", doc().node(doc().current()).at("fen")},
+                                                 {"notation", to_string(notation.Text())}});
+                navigate([&] { doc().play(move.at("move").at("from"), move.at("move").at("to")); });
+                notation.Text(L"");
+                break;
+            }
+            case C::Comment:
+                doc().set_comments({to_string(comment.Text())});
+                refresh();
+                break;
+            case C::Engine: {
+                if (analyzing)
+                    throw std::runtime_error("Stop analysis before changing engine");
+                auto file = picker(hwnd, false, L"*.exe", L"exe");
+                if (!file.empty()) {
+                    engine.reset();
+                    enginePath = file;
+                    status.Text(L"已选择：" + file.filename().wstring());
+                }
+                break;
+            }
+            case C::Analyze:
+                analyze();
+                break;
+            case C::Stop:
+                cancel();
+                status.Text(L"正在停止分析…");
+                break;
+            case C::CopyFen: {
+                Windows::ApplicationModel::DataTransfer::DataPackage data;
+                data.SetText(to_hstring(doc().node(doc().current()).at("fen").get<std::string>()));
+                Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(data);
+                status.Text(L"已复制当前 FEN");
+                break;
+            }
+            }
+        });
+    }
     void initialize() {
         squareTemplate = Markup::XamlReader::Load(LR"XAML(
 <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -305,41 +401,11 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             enginePath = bundled;
         window.Title(L"象棋 · Xiangqi Native");
         root.RequestedTheme(ElementTheme::Light);
-        root.Background(brush(247, 246, 242));
-        root.Padding(Thickness{20, 20, 20, 20});
-        root.RowSpacing(12);
-        for (auto length : {GridLength{1, GridUnitType::Auto}, GridLength{1, GridUnitType::Auto},
-                            GridLength{1, GridUnitType::Star}, GridLength{1, GridUnitType::Auto}}) {
-            RowDefinition r;
-            r.Height(length);
-            root.RowDefinitions().Append(r);
-        }
-        StackPanel header;
-        header.Orientation(Orientation::Horizontal);
-        header.Spacing(12);
-        TextBlock title;
-        title.Text(L"象棋");
-        title.FontSize(28);
-        title.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
-        header.Children().Append(title);
-        header.Children().Append(button(L"新建", [this] {
-            commit_comment();
-            cancel();
-            docs.emplace_back(kernel);
-            paths.emplace_back();
-            active = docs.size() - 1;
-            refresh_games();
-            refresh();
-        }));
-        header.Children().Append(button(L"打开…", [this] { open(); }));
-        header.Children().Append(button(L"保存 OXQ", [this] { save(); }));
-        header.Children().Append(button(L"导出 PGN…", [this] {
-            commit_comment();
-            auto p = picker(hwnd, true, L"*.pgn", L"pgn");
-            if (!p.empty())
-                xqn::save_atomic(p, bytes(doc().pgn()));
-        }));
-        games.Width(220);
+        board.ChildrenTransitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
+        depth.Minimum(1);
+        depth.Maximum(30);
+        depth.Value(15);
+        analyzeButton = button(L"开始分析", [this] { analyze(); });
         games.SelectionChanged([this](auto &&, auto &&) {
             if (updating || games.SelectedIndex() < 0)
                 return;
@@ -349,219 +415,22 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             selected = -1;
             refresh();
         });
-        header.Children().Append(games);
-        root.Children().Append(header);
-        StackPanel toolbar;
-        toolbar.Orientation(Orientation::Horizontal);
-        toolbar.Spacing(8);
-        Grid::SetRow(toolbar, 1);
-        toolbar.Children().Append(button(L"|◀", [this] { navigate([this] { doc().start(); }); }));
-        toolbar.Children().Append(button(L"◀", [this] { navigate([this] { doc().back(); }); }));
-        toolbar.Children().Append(button(L"▶", [this] { navigate([this] { doc().next(); }); }));
-        toolbar.Children().Append(button(L"▶|", [this] { navigate([this] { doc().end(); }); }));
-        toolbar.Children().Append(button(L"撤销", [this] { navigate([this] { doc().undo(); }); }));
-        toolbar.Children().Append(button(L"重做", [this] { navigate([this] { doc().redo(); }); }));
-        toolbar.Children().Append(button(L"翻转", [this] {
-            flipped = !flipped;
-            draw_board();
-        }));
-        toolbar.Children().Append(button(L"提升为主线", [this] {
-            cancel();
-            commit_comment();
-            doc().promote_current();
-            refresh();
-        }));
-        toolbar.Children().Append(button(L"删除分支", [this] {
-            cancel();
-            commit_comment();
-            doc().erase_current();
-            refresh();
-        }));
-        root.Children().Append(toolbar);
-        Grid content;
-        content.ColumnSpacing(24);
-        Grid::SetRow(content, 2);
-        ColumnDefinition left;
-        left.Width(GridLength{520, GridUnitType::Pixel});
-        content.ColumnDefinitions().Append(left);
-        ColumnDefinition right;
-        right.Width(GridLength{1, GridUnitType::Star});
-        content.ColumnDefinitions().Append(right);
-        StackPanel leftPanel;
-        leftPanel.Spacing(8);
-        turn.FontSize(18);
-        leftPanel.Children().Append(turn);
-        board.ChildrenTransitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
-        board.Width(xqn::ui::BoardView::width);
-        board.Height(xqn::ui::BoardView::height);
-        board.Background(brush(245, 246, 248));
-        Viewbox view;
-        view.Stretch(Stretch::Uniform);
-        view.Child(board);
-        view.MaxHeight(570);
-        Grid boardArea;
-        boardArea.ColumnSpacing(8);
-        for (auto width : {GridLength{8, GridUnitType::Pixel}, GridLength{1, GridUnitType::Star},
-                           GridLength{36, GridUnitType::Pixel}}) {
-            ColumnDefinition col;
-            col.Width(width);
-            boardArea.ColumnDefinitions().Append(col);
-        }
-        for (int i = 0; i < 2; i++) {
-            RowDefinition r;
-            r.Height(GridLength{1, GridUnitType::Star});
-            turnStrip.RowDefinitions().Append(r);
-        }
-        turnIndicator.CornerRadius(CornerRadius{4});
-        turnStrip.Children().Append(turnIndicator);
-        Border turnCard;
-        turnCard.CornerRadius(CornerRadius{4});
-        turnCard.Background(brush(236, 239, 243));
-        turnCard.BorderBrush(brush(206, 210, 218));
-        turnCard.BorderThickness(Thickness{1});
-        turnCard.Child(turnStrip);
-        boardArea.Children().Append(turnCard);
-        Border boardFrame;
-        boardFrame.CornerRadius(CornerRadius{8});
-        boardFrame.Child(view);
-        Grid::SetColumn(boardFrame, 1);
-        boardArea.Children().Append(boardFrame);
-        StackPanel rail;
-        rail.Spacing(6);
-        rail.VerticalAlignment(VerticalAlignment::Center);
-        auto railButton = [&](Symbol icon, const wchar_t *tip, std::function<void()> action) {
-            auto b = button(L"", action);
-            b.Content(SymbolIcon(icon));
-            b.Width(34);
-            b.Height(34);
-            b.MinWidth(0);
-            b.MinHeight(0);
-            b.Padding(Thickness{0});
-            b.CornerRadius(CornerRadius{17});
-            ToolTipService::SetToolTip(b, box_value(tip));
-            rail.Children().Append(b);
-        };
-        railButton(Symbol::Refresh, L"翻转棋盘", [this] {
-            flipped = !flipped;
-            draw_board();
-        });
-        railButton(Symbol::Undo, L"撤销", [this] { navigate([this] { doc().undo(); }); });
-        railButton(Symbol::Redo, L"重做", [this] { navigate([this] { doc().redo(); }); });
-        railButton(Symbol::Copy, L"复制 FEN", [this] {
-            Windows::ApplicationModel::DataTransfer::DataPackage data;
-            data.SetText(to_hstring(doc().node(doc().current()).at("fen").get<std::string>()));
-            Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(data);
-            status.Text(L"已复制当前 FEN");
-        });
-        Grid::SetColumn(rail, 2);
-        boardArea.Children().Append(rail);
-        leftPanel.Children().Append(boardArea);
-        StackPanel moveRow;
-        moveRow.Orientation(Orientation::Horizontal);
-        moveRow.Spacing(8);
-        notation.Width(300);
-        notation.PlaceholderText(L"输入着法，如 H2-E2 / 炮二平五");
-        moveRow.Children().Append(notation);
-        moveRow.Children().Append(button(L"走子", [this] {
-            auto m = kernel.call("move", {{"fen", doc().node(doc().current()).at("fen")},
-                                          {"notation", to_string(notation.Text())}});
-            navigate([&] { doc().play(m.at("move").at("from"), m.at("move").at("to")); });
-            notation.Text(L"");
-        }));
-        leftPanel.Children().Append(moveRow);
-        content.Children().Append(leftPanel);
-        Grid detail;
-        Grid::SetColumn(detail, 1);
-        detail.RowSpacing(8);
-        for (auto length : {GridLength{1, GridUnitType::Auto}, GridLength{1, GridUnitType::Star},
-                            GridLength{1, GridUnitType::Auto}, GridLength{1, GridUnitType::Auto},
-                            GridLength{1, GridUnitType::Auto}}) {
-            RowDefinition r;
-            r.Height(length);
-            detail.RowDefinitions().Append(r);
-        }
-        StackPanel engineRow;
-        engineRow.Orientation(Orientation::Horizontal);
-        engineRow.Spacing(8);
-        engineRow.Children().Append(button(L"选择皮卡鱼…", [this] {
-            if (analyzing)
-                throw std::runtime_error("Stop analysis before changing engine");
-            auto p = picker(hwnd, false, L"*.exe", L"exe");
-            if (!p.empty()) {
-                engine.reset();
-                enginePath = p;
-                status.Text(L"已选择：" + p.filename().wstring());
-            }
-        }));
-        depth.Minimum(1);
-        depth.Maximum(30);
-        depth.Value(15);
-        depth.Width(100);
-        engineRow.Children().Append(depth);
-        analyzeButton = button(L"分析当前局面", [this] { analyze(); });
-        engineRow.Children().Append(analyzeButton);
-        engineRow.Children().Append(button(L"停止", [this] {
-            cancel();
-            status.Text(L"正在停止分析…");
-        }));
-        detail.Children().Append(engineRow);
-        ScrollViewer graphScroll;
-        graph.VerticalAlignment(VerticalAlignment::Top);
-        graph.HorizontalAlignment(HorizontalAlignment::Left);
-        graphScroll.Content(graph);
-        graphScroll.VerticalContentAlignment(VerticalAlignment::Top);
-        graphScroll.HorizontalContentAlignment(HorizontalAlignment::Left);
-        graphScroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Auto);
-        graphScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
-        Grid study;
-        study.ColumnSpacing(12);
-        ColumnDefinition treeColumn;
-        treeColumn.Width(GridLength{1, GridUnitType::Star});
-        study.ColumnDefinitions().Append(treeColumn);
-        ColumnDefinition listColumn;
-        listColumn.Width(GridLength{238, GridUnitType::Pixel});
-        study.ColumnDefinitions().Append(listColumn);
-        Border treeCard;
-        treeCard.Background(brush(255, 255, 255));
-        treeCard.CornerRadius(CornerRadius{8});
-        treeCard.Child(graphScroll);
-        study.Children().Append(treeCard);
-        ScrollViewer moveScroll;
-        moveScroll.Content(moveList);
-        moveScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
-        Border listCard;
-        listCard.Background(brush(255, 255, 255));
-        listCard.CornerRadius(CornerRadius{8});
-        listCard.Child(moveScroll);
-        Grid::SetColumn(listCard, 1);
-        study.Children().Append(listCard);
-        Grid::SetRow(study, 1);
-        detail.Children().Append(study);
-        eval.TextWrapping(TextWrapping::Wrap);
-        Grid::SetRow(eval, 2);
-        detail.Children().Append(eval);
-        comment.AcceptsReturn(true);
-        comment.TextWrapping(TextWrapping::Wrap);
-        comment.Height(100);
-        comment.PlaceholderText(L"当前节点评论");
-        Grid::SetRow(comment, 3);
-        detail.Children().Append(comment);
-        auto saveComment = button(L"保存评论", [this] {
-            doc().set_comments({to_string(comment.Text())});
-            refresh();
-        });
-        Grid::SetRow(saveComment, 4);
-        detail.Children().Append(saveComment);
-        content.Children().Append(detail);
-        root.Children().Append(content);
-        status.TextWrapping(TextWrapping::Wrap);
-        status.FontSize(12);
-        Grid::SetRow(status, 3);
-        root.Children().Append(status);
+        shell = std::make_unique<xqn::ui::WorkspaceLayout>(
+            root,
+            xqn::ui::WorkspaceWidgets{board, graph, moveList, turnStrip, turnIndicator, turn, eval, status,
+                                      comment, notation, games, depth, analyzeButton},
+            [this](xqn::ui::ShellCommand command) { layout_command(command); });
         window.Content(root);
         auto native = window.as<IWindowNative>();
         check_hresult(native->get_WindowHandle(&hwnd));
-        window.AppWindow().Resize(Windows::Graphics::SizeInt32{1280, 900});
+        double scale = GetDpiForWindow(hwnd) / 96.0;
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor);
+        int workWidth = monitor.rcWork.right - monitor.rcWork.left;
+        int workHeight = monitor.rcWork.bottom - monitor.rcWork.top;
+        window.AppWindow().Resize(
+            Windows::Graphics::SizeInt32{(std::min)(static_cast<int>(820 * scale), workWidth / 2),
+                                         (std::min)(static_cast<int>(820 * scale), workHeight - 40)});
         window.AppWindow().Closing(
             [this](auto &&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const &args) {
                 if (!allow_close && dirty()) {
@@ -592,7 +461,9 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             }
             e.Handled(true);
         });
-        if (std::wstring(GetCommandLineW()).find(L"--smoke-test") != std::wstring::npos)
+        if (std::wstring(GetCommandLineW()).find(L"--layout-preview") != std::wstring::npos)
+            root.Loaded([this](auto &&, auto &&) { layout_preview(); });
+        else if (std::wstring(GetCommandLineW()).find(L"--smoke-test") != std::wstring::npos)
             root.Loaded([this](auto &&, auto &&) { smoke_test(); });
         refresh_games();
         refresh();
@@ -789,9 +660,9 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         Grid moves;
         moves.RowSpacing(2);
         moves.ColumnSpacing(4);
-        for (auto width : {34.0, 94.0, 94.0}) {
+        for (int column = 0; column < 3; ++column) {
             ColumnDefinition c;
-            c.Width(GridLength{width, GridUnitType::Pixel});
+            c.Width(column == 0 ? GridLength{28, GridUnitType::Pixel} : GridLength{1, GridUnitType::Star});
             moves.ColumnDefinitions().Append(c);
         }
         bool previousRed = false;
@@ -898,6 +769,59 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         peer.GetPattern(Peers::PatternInterface::Invoke).as<Provider::IInvokeProvider>().Invoke();
     }
 
+    fire_and_forget layout_preview() {
+        winrt::apartment_context ui;
+        auto keep = shared_from_this();
+        wchar_t module[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, module, MAX_PATH);
+        auto directory = std::filesystem::path(module).parent_path() / L"layout-preview";
+        std::filesystem::create_directories(directory);
+        try {
+            docs = xqn::Document::parse_pgn(kernel, "[Event \"布局预览\"]\n[Red \"红方\"]\n[Black \"黑方\"]\n"
+                                                    "1. H2-E2 {中炮开局，可在当前局面继续推演。} "
+                                                    "(H0-G2 H9-G7) H7-E7 2. H0-G2 H9-G7 *");
+            paths.assign(docs.size(), {});
+            active = 0;
+            doc().next();
+            refresh_games();
+            refresh();
+            struct Size {
+                int width, height;
+                wchar_t const *name;
+            };
+            xqn::Json captures = xqn::Json::array();
+            for (auto size : {Size{640, 640, L"compact-640.png"}, Size{768, 720, L"half-768.png"},
+                              Size{1280, 760, L"wide-1280.png"}}) {
+                RECT frame{}, client{};
+                GetWindowRect(hwnd, &frame);
+                GetClientRect(hwnd, &client);
+                double dpi = GetDpiForWindow(hwnd) / 96.0;
+                window.AppWindow().Resize(Windows::Graphics::SizeInt32{
+                    static_cast<int>(size.width * dpi) + frame.right - frame.left - client.right,
+                    static_cast<int>(size.height * dpi) + frame.bottom - frame.top - client.bottom});
+                co_await winrt::resume_after(std::chrono::milliseconds(350));
+                co_await ui;
+                root.UpdateLayout();
+                co_await capture_preview(directory / size.name);
+                captures.push_back({{"width", root.ActualWidth()},
+                                    {"height", root.ActualHeight()},
+                                    {"file", to_string(size.name)}});
+            }
+            xqn::save_atomic(
+                directory / L"result.json",
+                bytes(
+                    xqn::Json{{"passed", true}, {"kind", "layout-preview"}, {"captures", captures}}.dump(2)));
+        } catch (const hresult_error &error) {
+            xqn::save_atomic(
+                directory / L"result.json",
+                bytes(xqn::Json{{"passed", false}, {"error", to_string(error.message())}}.dump(2)));
+        } catch (const std::exception &error) {
+            xqn::save_atomic(directory / L"result.json",
+                             bytes(xqn::Json{{"passed", false}, {"error", error.what()}}.dump(2)));
+        }
+        allow_close = true;
+        window.Close();
+    }
     fire_and_forget smoke_test() {
         winrt::apartment_context ui;
         auto keep = shared_from_this();
@@ -1127,13 +1051,15 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
 };
 
 void startup_error(const hstring &message) {
-    if (std::wstring(GetCommandLineW()).find(L"--smoke-test") == std::wstring::npos) {
+    auto arguments = std::wstring(GetCommandLineW());
+    bool preview = arguments.find(L"--layout-preview") != std::wstring::npos;
+    if (!preview && arguments.find(L"--smoke-test") == std::wstring::npos) {
         MessageBoxW(nullptr, message.c_str(), L"象棋启动失败", MB_ICONERROR);
         return;
     }
     wchar_t module[MAX_PATH]{};
     GetModuleFileNameW(nullptr, module, MAX_PATH);
-    auto folder = std::filesystem::path(module).parent_path() / L"smoke";
+    auto folder = std::filesystem::path(module).parent_path() / (preview ? L"layout-preview" : L"smoke");
     std::filesystem::create_directories(folder);
     xqn::save_atomic(folder / L"result.json",
                      bytes(xqn::Json{{"passed", false}, {"startupError", to_string(message)}}.dump(2)));

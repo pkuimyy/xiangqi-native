@@ -36,6 +36,14 @@ Background resources change only when the internal board style changes. Orientat
 
 The window smoke test verifies stable grid/button/unchanged-piece identities, the moving piece's identity and parent, stable allocation counts, capture and undo, selection and cancellation, and repeated pointer-focused selection of the most recently moved piece with no automatic last-move marker. This guards against the original whole-board teardown and asynchronous SVG reload path. Full model projection and sidebar graph rebuilds remain separate performance work.
 
+### Provisional adaptive workspace
+
+app/workspace_layout.hpp composes native command tabs (File/Start/Analysis/View), CommandBars with overflow, a height-constrained board Viewbox, navigation below the board, and a study sidebar. Workspace dispatches the commands to the existing document and engine actions.
+
+At widths below 720 effective pixels the sidebar is 228px; at medium widths it is 252px. At 1120px and above it becomes 280px and the existing graph ScrollViewer moves into a separate 300px third column. Narrow layouts switch between moves and graph. The board subtree remains attached throughout. Notes and notation input use native Expanders. These values are provisional until user review; draggable dividers and saved pane preferences are not implemented yet.
+
+Default startup approximates half the current monitor width and stays within its working height. --layout-preview renders three native windows and captures them without running the document/engine regression suite.
+
 ## Persistent metadata
 
 Game headers are JSON text in metadata.extensions under org.xiangqi.native/pgn_headers. Native node metadata uses a source_note annotation with author org.xiangqi.native/v1 and text {"version":1,"data":{...}}.

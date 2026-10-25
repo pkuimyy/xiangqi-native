@@ -57,7 +57,7 @@
   </Link>
   <Manifest><AdditionalManifestFiles>app.manifest</AdditionalManifestFiles></Manifest>
  </ItemDefinitionGroup>
- <ItemGroup><ClCompile Include="main.cpp" /><ClInclude Include="board_view.hpp" /><Reference Include="$(ProjectDir)..\.packages\nuget\microsoft.web.webview2\1.0.3179.45\lib\Microsoft.Web.WebView2.Core.winmd" /></ItemGroup>
+ <ItemGroup><ClCompile Include="main.cpp" /><ClInclude Include="board_view.hpp" /><ClInclude Include="workspace_layout.hpp" /><Reference Include="$(ProjectDir)..\.packages\nuget\microsoft.web.webview2\1.0.3179.45\lib\Microsoft.Web.WebView2.Core.winmd" /></ItemGroup>
  <Target Name="RemoveRetiredAssets" BeforeTargets="CopyOriginalAssets">
   <ItemGroup><RetiredAsset Include="$(OutDir)assets\wood.jpg;$(OutDir)assets\pieces\traditional\*.svg" /></ItemGroup>
   <Delete Files="@(RetiredAsset)" />
