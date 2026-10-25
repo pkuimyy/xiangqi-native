@@ -39,7 +39,6 @@ struct WorkspaceWidgets {
     sc::Border turnIndicator;
     sc::TextBlock turn, evaluation, status;
     sc::TextBox comment, notation;
-    sc::ComboBox games;
     sc::NumberBox depth;
     sc::Button analyze;
 };
@@ -47,8 +46,9 @@ struct WorkspaceWidgets {
 // A provisional native shell; document operations remain owned by Workspace.
 class WorkspaceLayout {
   public:
-    WorkspaceLayout(sc::Grid root, WorkspaceWidgets widgets, std::function<void(ShellCommand)> command)
-        : root_(root), w_(widgets), command_(std::move(command)) {
+    WorkspaceLayout(sc::Grid root, WorkspaceWidgets widgets, double boardWidth,
+                    std::function<void(ShellCommand)> command)
+        : root_(root), w_(widgets), command_(std::move(command)), boardWidth_(boardWidth) {
         root_.Background(ink(243, 243, 243));
         root_.Padding(sx::Thickness{12, 8, 12, 8});
         root_.RowSpacing(8);
@@ -62,13 +62,15 @@ class WorkspaceLayout {
         create_board();
         create_study();
         content_.ColumnSpacing(12);
-        content_.MaxWidth(1480);
-        content_.HorizontalAlignment(sx::HorizontalAlignment::Stretch);
-        for (auto unit : {sx::GridUnitType::Star, sx::GridUnitType::Pixel, sx::GridUnitType::Pixel}) {
+        content_.Height(boardWidth_ * 548.0 / 466.0 + 72);
+        content_.HorizontalAlignment(sx::HorizontalAlignment::Left);
+        content_.VerticalAlignment(sx::VerticalAlignment::Top);
+        for (auto unit : {sx::GridUnitType::Pixel, sx::GridUnitType::Pixel, sx::GridUnitType::Pixel}) {
             sc::ColumnDefinition column;
             column.Width(sx::GridLength{1, unit});
             content_.ColumnDefinitions().Append(column);
         }
+        content_.ColumnDefinitions().GetAt(0).Width(sx::GridLength{boardWidth_, sx::GridUnitType::Pixel});
         content_.ColumnDefinitions().GetAt(1).Width(sx::GridLength{252, sx::GridUnitType::Pixel});
         content_.ColumnDefinitions().GetAt(2).Width(sx::GridLength{0, sx::GridUnitType::Pixel});
         content_.Children().Append(boardPane_);
@@ -76,8 +78,14 @@ class WorkspaceLayout {
         content_.Children().Append(sidebar_);
         sc::Grid::SetColumn(wideTree_, 2);
         content_.Children().Append(wideTree_);
-        sc::Grid::SetRow(content_, 2);
-        root_.Children().Append(content_);
+        sc::ScrollViewer workspaceScroll;
+        workspaceScroll.Content(content_);
+        workspaceScroll.HorizontalContentAlignment(sx::HorizontalAlignment::Left);
+        workspaceScroll.VerticalContentAlignment(sx::VerticalAlignment::Top);
+        workspaceScroll.HorizontalScrollBarVisibility(sc::ScrollBarVisibility::Auto);
+        workspaceScroll.VerticalScrollBarVisibility(sc::ScrollBarVisibility::Auto);
+        sc::Grid::SetRow(workspaceScroll, 2);
+        root_.Children().Append(workspaceScroll);
         w_.status.FontSize(11);
         w_.status.Foreground(ink(105, 110, 120));
         w_.status.TextTrimming(sx::TextTrimming::CharacterEllipsis);
@@ -88,6 +96,8 @@ class WorkspaceLayout {
         select_ribbon(0);
         select_study(false);
     }
+
+    void show_analysis() { select_ribbon(1); }
 
     void adapt() {
         double width = root_.ActualWidth();
@@ -100,6 +110,8 @@ class WorkspaceLayout {
                                                                    sx::GridUnitType::Pixel});
         content_.ColumnDefinitions().GetAt(2).Width(
             sx::GridLength{wide ? 300.0 : 0.0, sx::GridUnitType::Pixel});
+        double sidebarWidth = width < 720 ? 228.0 : wide ? 280.0 : 252.0;
+        content_.Width(boardWidth_ + sidebarWidth + (wide ? 300.0 : 0.0) + 24);
         if (wide != wide_) {
             if (wide) {
                 studyViews_.Children().RemoveAt(1);
@@ -119,11 +131,11 @@ class WorkspaceLayout {
     sc::Grid root_, content_, boardPane_, sidebar_, studyViews_, wideTree_, wideTreeBody_;
     sc::Border treeCard_, moveCard_;
     sc::StackPanel studySwitch_;
-    sc::Expander notes_, notation_;
     WorkspaceWidgets w_;
     std::function<void(ShellCommand)> command_;
     std::array<sc::CommandBar, 3> ribbons_;
     std::vector<sc::Primitives::ToggleButton> tabs_, studyTabs_;
+    double boardWidth_;
     bool wide_ = false, treeSelected_ = false;
     static sm::SolidColorBrush ink(unsigned r, unsigned g, unsigned b) {
         return sm::SolidColorBrush(winrt::Windows::UI::Color{
@@ -240,29 +252,22 @@ class WorkspaceLayout {
         add(1, L"停止", sc::Symbol::Stop, ShellCommand::Stop);
         add(2, L"翻转棋盘", sc::Symbol::Refresh, ShellCommand::Flip);
         add(2, L"复制 FEN", sc::Symbol::Copy, ShellCommand::CopyFen);
-        sc::AppBarButton notes;
-        notes.Label(L"注释");
-        notes.Icon(sc::SymbolIcon(sc::Symbol::Edit));
-        notes.Click([this](auto &&, auto &&) { notes_.IsExpanded(!notes_.IsExpanded()); });
-        ribbons_[2].PrimaryCommands().Append(notes);
-        sc::AppBarButton input;
-        input.Label(L"输入着法");
-        input.Icon(sc::SymbolIcon(sc::Symbol::Keyboard));
-        input.Click([this](auto &&, auto &&) { notation_.IsExpanded(!notation_.IsExpanded()); });
-        ribbons_[2].PrimaryCommands().Append(input);
+        ribbonCard.Height(48);
         ribbonCard.Child(ribbonHost);
         sc::Grid::SetRow(ribbonCard, 1);
         root_.Children().Append(ribbonCard);
     }
     void create_board() {
+        boardPane_.Width(boardWidth_);
         boardPane_.RowSpacing(8);
-        for (auto unit : {sx::GridUnitType::Auto, sx::GridUnitType::Star, sx::GridUnitType::Auto,
-                          sx::GridUnitType::Auto}) {
+        boardPane_.VerticalAlignment(sx::VerticalAlignment::Top);
+        for (int i = 0; i < 3; ++i) {
             sc::RowDefinition row;
-            row.Height(sx::GridLength{1, unit});
+            row.Height(sx::GridLength{1, sx::GridUnitType::Auto});
             boardPane_.RowDefinitions().Append(row);
         }
         w_.turn.FontSize(14);
+        w_.turn.Height(24);
         w_.turn.Margin(sx::Thickness{16, 0, 0, 0});
         boardPane_.Children().Append(w_.turn);
         w_.board.Width(450);
@@ -294,21 +299,37 @@ class WorkspaceLayout {
         surface.Children().Append(w_.board);
         sc::Viewbox view;
         view.Stretch(sm::Stretch::Uniform);
-        view.MaxWidth(620);
-        view.MaxHeight(730);
+        view.Width(boardWidth_);
+        view.Height(boardWidth_ * 548.0 / 466.0);
         view.Child(surface);
         sc::Grid::SetRow(view, 1);
         boardPane_.Children().Append(view);
+
+        sc::Grid controls;
+        controls.Height(32);
+        controls.ColumnSpacing(6);
+        for (auto unit : {sx::GridUnitType::Auto, sx::GridUnitType::Star, sx::GridUnitType::Auto}) {
+            sc::ColumnDefinition column;
+            column.Width(sx::GridLength{1, unit});
+            controls.ColumnDefinitions().Append(column);
+        }
         sc::StackPanel navigation;
         navigation.Orientation(sc::Orientation::Horizontal);
-        navigation.HorizontalAlignment(sx::HorizontalAlignment::Center);
-        navigation.Spacing(4);
+        navigation.Spacing(2);
         for (auto entry : {std::pair{L"|◀", ShellCommand::First},
                            {L"◀", ShellCommand::Back},
                            {L"▶", ShellCommand::Next},
                            {L"▶|", ShellCommand::Last},
-                           {L"翻转", ShellCommand::Flip}}) {
+                           {L"↻", ShellCommand::Flip}}) {
             auto control = button(entry.first, entry.second);
+            control.Width(26);
+            control.Height(32);
+            control.MinWidth(0);
+            control.MinHeight(0);
+            control.Padding(sx::Thickness{0});
+            control.FontSize(12);
+            if (entry.second == ShellCommand::Flip)
+                control.Content(sc::SymbolIcon(sc::Symbol::Refresh));
             sc::ToolTipService::SetToolTip(
                 control, winrt::box_value(entry.second == ShellCommand::First  ? L"回到开始"
                                           : entry.second == ShellCommand::Back ? L"上一着（←）"
@@ -317,27 +338,24 @@ class WorkspaceLayout {
                                                                                : L"翻转棋盘"));
             navigation.Children().Append(control);
         }
-        sc::Grid::SetRow(navigation, 2);
-        boardPane_.Children().Append(navigation);
-        notation_.Header(winrt::box_value(L"输入着法"));
-        notation_.HorizontalAlignment(sx::HorizontalAlignment::Stretch);
-        notation_.HorizontalContentAlignment(sx::HorizontalAlignment::Stretch);
-        notation_.MinWidth(0);
-        sc::Grid inputRow;
-        inputRow.ColumnSpacing(6);
-        sc::ColumnDefinition field, submit;
-        field.Width(sx::GridLength{1, sx::GridUnitType::Star});
-        submit.Width(sx::GridLength{1, sx::GridUnitType::Auto});
-        inputRow.ColumnDefinitions().Append(field);
-        inputRow.ColumnDefinitions().Append(submit);
-        w_.notation.PlaceholderText(L"如 炮二平五 / H2-E2");
-        inputRow.Children().Append(w_.notation);
+        controls.Children().Append(navigation);
+        w_.notation.MinWidth(0);
+        w_.notation.Height(32);
+        w_.notation.FontSize(13);
+        w_.notation.Padding(sx::Thickness{6, 4, 6, 4});
+        w_.notation.PlaceholderText(L"输入着法");
+        sc::ToolTipService::SetToolTip(w_.notation, winrt::box_value(L"如 炮二平五 / H2-E2"));
+        sc::Grid::SetColumn(w_.notation, 1);
+        controls.Children().Append(w_.notation);
         auto play = button(L"走子", ShellCommand::Play);
-        sc::Grid::SetColumn(play, 1);
-        inputRow.Children().Append(play);
-        notation_.Content(inputRow);
-        sc::Grid::SetRow(notation_, 3);
-        boardPane_.Children().Append(notation_);
+        play.Width(40);
+        play.Height(32);
+        play.MinWidth(0);
+        play.Padding(sx::Thickness{4, 0, 4, 0});
+        sc::Grid::SetColumn(play, 2);
+        controls.Children().Append(play);
+        sc::Grid::SetRow(controls, 2);
+        boardPane_.Children().Append(controls);
     }
     void create_study() {
         sidebar_.RowSpacing(8);
@@ -347,18 +365,9 @@ class WorkspaceLayout {
             row.Height(sx::GridLength{1, unit});
             sidebar_.RowDefinitions().Append(row);
         }
-        sc::Grid heading;
-        sc::ColumnDefinition title, game;
-        title.Width(sx::GridLength{1, sx::GridUnitType::Star});
-        game.Width(sx::GridLength{1, sx::GridUnitType::Auto});
-        heading.ColumnDefinitions().Append(title);
-        heading.ColumnDefinitions().Append(game);
         auto name = text(L"棋谱", 16);
-        heading.Children().Append(name);
-        w_.games.Width(140);
-        sc::Grid::SetColumn(w_.games, 1);
-        heading.Children().Append(w_.games);
-        sidebar_.Children().Append(heading);
+        name.Height(32);
+        sidebar_.Children().Append(name);
         studySwitch_.Orientation(sc::Orientation::Horizontal);
         studySwitch_.Spacing(4);
         for (auto name : {L"着法", L"图形树"}) {
@@ -399,15 +408,19 @@ class WorkspaceLayout {
         w_.evaluation.Foreground(ink(90, 98, 110));
         w_.evaluation.TextWrapping(sx::TextWrapping::Wrap);
         w_.evaluation.MaxLines(2);
+        w_.evaluation.Height(32);
         sc::Grid::SetRow(w_.evaluation, 3);
         sidebar_.Children().Append(w_.evaluation);
-        notes_.Header(winrt::box_value(L"当前着注释"));
-        notes_.HorizontalAlignment(sx::HorizontalAlignment::Stretch);
-        notes_.HorizontalContentAlignment(sx::HorizontalAlignment::Stretch);
-        notes_.MinWidth(0);
-        notes_.IsExpanded(true);
+        sc::Border notesCard;
+        notesCard.Background(ink(250, 250, 250));
+        notesCard.CornerRadius(sx::CornerRadius{6});
+        notesCard.BorderBrush(ink(226, 228, 232));
+        notesCard.BorderThickness(sx::Thickness{1});
+        notesCard.Padding(sx::Thickness{12});
+        notesCard.Height(176);
         sc::StackPanel notesBody;
         notesBody.Spacing(6);
+        notesBody.Children().Append(text(L"当前着注释", 13));
         w_.comment.AcceptsReturn(true);
         w_.comment.TextWrapping(sx::TextWrapping::Wrap);
         w_.comment.Height(80);
@@ -416,9 +429,9 @@ class WorkspaceLayout {
         auto save = button(L"保存注释", ShellCommand::Comment);
         save.HorizontalAlignment(sx::HorizontalAlignment::Right);
         notesBody.Children().Append(save);
-        notes_.Content(notesBody);
-        sc::Grid::SetRow(notes_, 4);
-        sidebar_.Children().Append(notes_);
+        notesCard.Child(notesBody);
+        sc::Grid::SetRow(notesCard, 4);
+        sidebar_.Children().Append(notesCard);
         wideTree_.RowSpacing(8);
         sc::RowDefinition header, body;
         header.Height(sx::GridLength{1, sx::GridUnitType::Auto});

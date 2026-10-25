@@ -10,7 +10,7 @@ Date: 2026-10-25. The current checkpoint implements the user's C++-only requirem
 - Only the flat native board is exposed to users; custom/bamboo rendering stays internal. All 14 OXDF-editor SVG pieces remain unchanged. Wood and old traditional piece assets are removed.
 - Native vector pieces, board click-to-move/flip, legal dots, annotations and best-move arrows; no automatic last-move marking.
 - WinUI native side toolbar, FEN copy, current-turn strip, compact branch graph and two-column Chinese move list.
-- Multiple games; navigation, branch deletion/promotion, comments, undo/redo.
+- Single-document UI; navigation, branch deletion/promotion, comments, undo/redo. Collection parsing remains in the core.
 - OXQF authoritative model, fetched directly at 206f807 from pkuimyy/OXQF; rich metadata and unknown annotations preserved.
 - PGN import/export; Unicode paths, native file dialogs and atomic OXQ overwrite.
 - Native UCI analysis with cancellation, timeout, stale-result protection and Red-view scores.
@@ -84,6 +84,16 @@ The UI regression checks both colours in both orientations, fixed row heights de
 Replaced the fixed 520px board column and always-visible study/engine controls with a provisional native WorkspaceLayout. File/Start/Analysis/View group the commands, navigation sits below the board, notation input and comments collapse, and moves/graph share a compact sidebar. Widths at or above 1120 effective pixels show graph in a third column; default startup targets half-screen use. Piece rendering, turn indication, document model and engine behavior are reused.
 
 The standard Release build succeeded. A lightweight --layout-preview startup renders 640x640, 768x720 and 1280x760 client areas and captures their actual WinUI content. The three actual rendered captures were inspected and saved as docs/assets/layout-{compact,half,wide}.png. Per user request, full CTest and functional smoke suites are deferred until the design is approved. This is a layout review checkpoint; panel sizes, spacing, movable dividers, saved preferences and visual polish remain open.
+
+## Fixed board and engine guide (2026-10-26)
+
+Board viewport dimensions are chosen once at startup from the current monitor and client area. Resizing the window, displaying the wide graph column and switching command tabs keep the board/input region fixed; smaller windows use scrollbars. Navigation/flip and notation input share one persistent 32px row. The note editor is always open, with fixed space for the evaluation and note card.
+
+Removed the game-count selector. The UI replaces one current document; new/open prepares its replacement, handles unsaved changes through Save/Discard/Cancel, and rejects multi-game inputs before changing the document. Collection parsing remains available in the core for a future explorer.
+
+Added docs/PIKAFISH_GUIDE.md with setup, a depth-6 first run, Red-view scores, stopping/navigation, save/reopen and troubleshooting. The bundled Release engine/NNUE files are present. No engine behavior was changed.
+
+Release compilation and the lightweight preview passed: the actual board remained 450x548 logical pixels on this monitor across compact, half, wide and Analysis views. Final compact/half/wide/analysis captures were inspected and saved under docs/assets; the full regression suite remains deferred during layout review.
 
 ## Next work
 

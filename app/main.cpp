@@ -188,11 +188,10 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     TextBlock eval;
     TextBox comment;
     TextBox notation;
-    ComboBox games;
     Button analyzeButton;
     NumberBox depth;
     HWND hwnd{};
-    bool updating{}, flipped{}, allow_close{}, analyzing{};
+    bool flipped{}, allow_close{}, analyzing{};
     int selected = -1;
     std::uint64_t generation{};
     std::filesystem::path enginePath;
@@ -285,14 +284,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         run([this, command] {
             switch (command) {
             case C::NewGame:
-                commit_comment();
-                cancel();
-                docs.emplace_back(kernel);
-                paths.emplace_back();
-                active = docs.size() - 1;
-                selected = -1;
-                refresh_games();
-                refresh();
+                open(true);
                 break;
             case C::Open:
                 open();
@@ -406,21 +398,6 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         depth.Maximum(30);
         depth.Value(15);
         analyzeButton = button(L"开始分析", [this] { analyze(); });
-        games.SelectionChanged([this](auto &&, auto &&) {
-            if (updating || games.SelectedIndex() < 0)
-                return;
-            commit_comment();
-            cancel();
-            active = static_cast<size_t>(games.SelectedIndex());
-            selected = -1;
-            refresh();
-        });
-        shell = std::make_unique<xqn::ui::WorkspaceLayout>(
-            root,
-            xqn::ui::WorkspaceWidgets{board, graph, moveList, turnStrip, turnIndicator, turn, eval, status,
-                                      comment, notation, games, depth, analyzeButton},
-            [this](xqn::ui::ShellCommand command) { layout_command(command); });
-        window.Content(root);
         auto native = window.as<IWindowNative>();
         check_hresult(native->get_WindowHandle(&hwnd));
         double scale = GetDpiForWindow(hwnd) / 96.0;
@@ -431,6 +408,20 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         window.AppWindow().Resize(
             Windows::Graphics::SizeInt32{(std::min)(static_cast<int>(820 * scale), workWidth / 2),
                                          (std::min)(static_cast<int>(820 * scale), workHeight - 40)});
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        double clientWidth = client.right / scale;
+        double clientHeight = client.bottom / scale;
+        double sideWidth = clientWidth < 720 ? 228 : 252;
+        double boardWidth = (std::clamp)(
+            (std::min)({466.0, clientWidth - sideWidth - 48.0, (clientHeight - 212.0) * 466.0 / 548.0}),
+            344.0, 466.0);
+        shell = std::make_unique<xqn::ui::WorkspaceLayout>(
+            root,
+            xqn::ui::WorkspaceWidgets{board, graph, moveList, turnStrip, turnIndicator, turn, eval, status,
+                                      comment, notation, depth, analyzeButton},
+            boardWidth, [this](xqn::ui::ShellCommand command) { layout_command(command); });
+        window.Content(root);
         window.AppWindow().Closing(
             [this](auto &&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const &args) {
                 if (!allow_close && dirty()) {
@@ -465,17 +456,8 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             root.Loaded([this](auto &&, auto &&) { layout_preview(); });
         else if (std::wstring(GetCommandLineW()).find(L"--smoke-test") != std::wstring::npos)
             root.Loaded([this](auto &&, auto &&) { smoke_test(); });
-        refresh_games();
         refresh();
         window.Activate();
-    }
-    void refresh_games() {
-        updating = true;
-        games.Items().Clear();
-        for (size_t i = 0; i < docs.size(); ++i)
-            games.Items().Append(box_value(L"第 " + std::to_wstring(i + 1) + L" 局"));
-        games.SelectedIndex(static_cast<int>(active));
-        updating = false;
     }
     void navigate(const std::function<void()> &action) {
         commit_comment();
@@ -712,22 +694,49 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         moveList.Children().Append(moves);
     }
 
-    void open() {
-        auto p = picker(hwnd, false, L"*.oxq;*.pgn;*.cbl", L"oxq");
-        if (p.empty())
-            return;
-        commit_comment();
-        auto opened = xqn::open_documents(kernel, p);
-        if (opened.empty())
-            throw std::runtime_error("No games in file");
-        cancel();
-        active = docs.size();
-        for (auto &d : opened) {
-            docs.push_back(std::move(d));
-            paths.push_back(p.extension() == L".oxq" ? p : std::filesystem::path{});
+    fire_and_forget open(bool create = false) {
+        auto keep = shared_from_this();
+        try {
+            std::filesystem::path file;
+            std::vector<xqn::Document> opened;
+            if (create)
+                opened.emplace_back(kernel);
+            else {
+                file = picker(hwnd, false, L"*.oxq;*.pgn;*.cbl", L"oxq");
+                if (file.empty())
+                    co_return;
+                opened = xqn::open_documents(kernel, file);
+                if (opened.size() != 1)
+                    throw std::runtime_error("当前界面仅支持单局棋谱；请将多局文件拆分后再打开。");
+            }
+            if (dirty()) {
+                ContentDialog dialog;
+                dialog.XamlRoot(root.XamlRoot());
+                dialog.Title(box_value(L"当前棋谱尚未保存"));
+                dialog.Content(box_value(L"保存当前棋谱后继续，或放弃修改。"));
+                dialog.PrimaryButtonText(L"保存并继续");
+                dialog.SecondaryButtonText(L"不保存");
+                dialog.CloseButtonText(L"取消");
+                auto choice = co_await dialog.ShowAsync();
+                if (choice == ContentDialogResult::None)
+                    co_return;
+                if (choice == ContentDialogResult::Primary) {
+                    save();
+                    if (dirty())
+                        co_return;
+                }
+            }
+            cancel();
+            docs = std::move(opened);
+            paths.assign(1, file.extension() == L".oxq" ? file : std::filesystem::path{});
+            active = 0;
+            selected = -1;
+            refresh();
+        } catch (const hresult_error &error) {
+            status.Text(L"操作失败：" + error.message());
+        } catch (const std::exception &error) {
+            status.Text(L"操作失败：" + to_hstring(error.what()));
         }
-        refresh_games();
-        refresh();
     }
     void save() {
         commit_comment();
@@ -783,15 +792,19 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             paths.assign(docs.size(), {});
             active = 0;
             doc().next();
-            refresh_games();
             refresh();
             struct Size {
                 int width, height;
                 wchar_t const *name;
             };
             xqn::Json captures = xqn::Json::array();
-            for (auto size : {Size{640, 640, L"compact-640.png"}, Size{768, 720, L"half-768.png"},
-                              Size{1280, 760, L"wide-1280.png"}}) {
+            double fixedBoardWidth = 0, fixedBoardHeight = 0;
+            for (auto size : {Size{640, 640, L"compact-640.png"}, Size{768, 800, L"half-768.png"},
+                              Size{1280, 800, L"wide-1280.png"}, Size{768, 800, L"analysis-768.png"}}) {
+                if (std::wstring(size.name) == L"analysis-768.png") {
+                    depth.Value(6);
+                    shell->show_analysis();
+                }
                 RECT frame{}, client{};
                 GetWindowRect(hwnd, &frame);
                 GetClientRect(hwnd, &client);
@@ -802,15 +815,27 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                 co_await winrt::resume_after(std::chrono::milliseconds(350));
                 co_await ui;
                 root.UpdateLayout();
+                auto bounds =
+                    board.TransformToVisual(root).TransformBounds(Windows::Foundation::Rect{0, 0, 450, 548});
+                if (fixedBoardWidth == 0) {
+                    fixedBoardWidth = bounds.Width;
+                    fixedBoardHeight = bounds.Height;
+                } else if (std::abs(bounds.Width - fixedBoardWidth) > .01 ||
+                           std::abs(bounds.Height - fixedBoardHeight) > .01)
+                    throw std::runtime_error(
+                        "Board changed size while resizing the window or switching commands");
                 co_await capture_preview(directory / size.name);
                 captures.push_back({{"width", root.ActualWidth()},
                                     {"height", root.ActualHeight()},
                                     {"file", to_string(size.name)}});
             }
-            xqn::save_atomic(
-                directory / L"result.json",
-                bytes(
-                    xqn::Json{{"passed", true}, {"kind", "layout-preview"}, {"captures", captures}}.dump(2)));
+            xqn::save_atomic(directory / L"result.json", bytes(xqn::Json{{"passed", true},
+                                                                         {"kind", "layout-preview"},
+                                                                         {"fixedBoard", true},
+                                                                         {"boardWidth", fixedBoardWidth},
+                                                                         {"boardHeight", fixedBoardHeight},
+                                                                         {"captures", captures}}
+                                                                   .dump(2)));
         } catch (const hresult_error &error) {
             xqn::save_atomic(
                 directory / L"result.json",
@@ -836,7 +861,6 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             paths.assign(docs.size(), {});
             active = 0;
             doc().next();
-            refresh_games();
             refresh();
             if (boardView->square_count() != 90 || graph.Children().Size() < 7)
                 throw std::runtime_error("Native controls did not populate");

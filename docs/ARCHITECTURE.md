@@ -38,11 +38,11 @@ The window smoke test verifies stable grid/button/unchanged-piece identities, th
 
 ### Provisional adaptive workspace
 
-app/workspace_layout.hpp composes native command tabs (File/Start/Analysis/View), CommandBars with overflow, a height-constrained board Viewbox, navigation below the board, and a study sidebar. Workspace dispatches the commands to the existing document and engine actions.
+app/workspace_layout.hpp composes native command tabs (File/Start/Analysis/View), CommandBars with overflow, a fixed-size board Viewbox, navigation below the board, and a study sidebar. Workspace dispatches the commands to the existing document and engine actions.
 
-At widths below 720 effective pixels the sidebar is 228px; at medium widths it is 252px. At 1120px and above it becomes 280px and the existing graph ScrollViewer moves into a separate 300px third column. Narrow layouts switch between moves and graph. The board subtree remains attached throughout. Notes and notation input use native Expanders. These values are provisional until user review; draggable dividers and saved pane preferences are not implemented yet.
+At widths below 720 effective pixels the sidebar is 228px; at medium widths it is 252px. At 1120px and above it becomes 280px and the existing graph ScrollViewer moves into a separate 300px third column. Narrow layouts switch between moves and graph. The board subtree remains attached throughout. Board viewport dimensions are computed once from the startup monitor/client area. Window resizing and command tabs do not alter them; the workspace scrolls if it does not fit. Five navigation/flip controls, notation input and its submit button share one permanent 32px row. Notes use an always-open fixed-height card, and evaluation text has a reserved height. These values are provisional until user review; draggable dividers and saved pane preferences are not implemented yet.
 
-Default startup approximates half the current monitor width and stays within its working height. --layout-preview renders three native windows and captures them without running the document/engine regression suite.
+Default startup approximates half the current monitor width and stays within its working height. --layout-preview captures compact/half/wide/analysis views and verifies that the actual transformed board dimensions remain identical, without running the document/engine regression suite.
 
 ## Persistent metadata
 
@@ -58,7 +58,7 @@ Windows saves write a sibling temporary file exclusively, flush it, then use Rep
 
 Native tree hydration rejects duplicates, cycles, shared children and orphans, with a 100,000-node limit. PGN variation nesting is bounded at 512 and layout/export depth at 2048. Layout and export use explicit traversal stacks; a 2048-ply replay/export regression verifies the supported depth without recursive Windows call-stack growth. These bounds do not imply large-tree UI responsiveness: projections are currently complete recomputations.
 
-Opened multi-game PGNs produce independent Documents. OXQ save and PGN export act on the active game. CBL input currently rejects conversion diagnostics; collection export and diagnostics review are future work.
+Core parsing retains collection support. The current UI has one document and no game-count selector. New/open prepares the replacement first, rejects non-single-game input, handles unsaved edits through Save/Discard/Cancel, and then replaces the current document. OXQ save and PGN export act on that document. CBL input currently rejects conversion diagnostics; collection export and diagnostics review are future work.
 
 ## UCI
 

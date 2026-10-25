@@ -4,7 +4,7 @@ Independent Windows application. The user requires WinUI 3 native controls, C++ 
 
 ## Architecture
 
-- app/: programmatic C++/WinRT UI. No WebView host. app/board_view.hpp owns a retained board visual tree. app/workspace_layout.hpp composes the provisional compact command surface and adaptive study panes; Workspace retains document/engine actions.
+- app/: programmatic C++/WinRT UI. No WebView host. app/board_view.hpp owns a retained board visual tree. app/workspace_layout.hpp composes the compact command surface and adaptive study panes; Workspace retains document/engine actions. Compute board viewport dimensions once at startup; do not resize it with the window or command tabs. Use scrolling when space is insufficient. Keep five navigation/flip controls and notation input on one persistent row; notes stay open. No game-count selector or hidden multi-document UI. New/open safely replaces the single document after handling unsaved edits; reject multi-game inputs before replacement.
 - src/core/rules.cpp: native rules, FEN, Chinese/WXF/ICCS notation.
 - src/core/pgn.cpp: native PGN parser/stringifier and original comment metadata conventions.
 - src/core/layout.cpp: C++ port of the original Walker/Buchheim layout.
@@ -26,5 +26,5 @@ The legacy checkmate flag means no legal moves, including stalemate. The UI dist
 OXQ NodeId is session-local; never use it as a persistent external key.
 Node metadata is a versioned source_note authored org.xiangqi.native/v1; retain unknown annotations.
 Native app --smoke-test verifies button-driven board moves, OXQ save/reopen, piece selection/cancellation, plain-board flip and native rendering. Do not exercise the bamboo/custom board in tests.
-Use scripts/smoke.ps1 and scripts/setup-engine.ps1. Keep engine and network licenses. During the user-requested layout preview phase, --layout-preview only starts the app and captures 640/768/1280 logical-pixel windows; defer the full test suite until the layout is approved.
+Use scripts/smoke.ps1 and scripts/setup-engine.ps1. Keep engine and network licenses. During the user-requested layout preview phase, --layout-preview starts the app, captures compact/half/wide/analysis views and checks unchanged rendered board dimensions; defer the full test suite until the layout is approved.
 Do not claim complete feature parity; record verified work and actual remaining features in docs/PROGRESS.md.
