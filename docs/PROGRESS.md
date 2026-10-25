@@ -57,7 +57,7 @@ The current application was rebuilt into build/winui/Release/XiangqiNative.exe u
 
 Replaced full-board Clear/recreation with app/board_view.hpp: five retained layers, 90 persistent input buttons, cached SVG piece visuals and cached grid/background resources. Moving pieces keep the same parent and only change coordinates. Captures hide their visuals; undo reuses them. Selection and legal hints update existing properties.
 
-Four native tests and the same-directory temporary UI verification passed. The UI checks retained button/grid/piece identity, moving-piece parent, constant 32-piece visual allocation, capture and undo, and selection/cancellation. Final replacement of the standard Release executable is waiting for the current running window to close.
+Four native tests and the same-directory temporary UI verification passed. The UI checks retained button/grid/piece identity, moving-piece parent, constant 32-piece visual allocation, capture and undo, and selection/cancellation. The standard build/winui/Release/XiangqiNative.exe has now been rebuilt and passed the same window checks after the previous window was closed.
 
 ## Next work
 
