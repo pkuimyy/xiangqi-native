@@ -71,7 +71,7 @@ Combined the original grid, OXDF-editor river lettering paths and outlined file 
 
 Removed native river/coordinate TextBlocks and all automatic last-move decoration. Retained grid/piece/button identities and move/capture/undo behavior are unchanged. The UI smoke flow now exercises only the plain board, including flip and repeated selection of the recently moved piece; it no longer enters the bamboo theme.
 
-Release verification passed and both orientation screenshots were inspected. Standard Release deployment is pending closure of the running window.
+Release verification passed and both orientation screenshots were inspected. The standard build/winui/Release/XiangqiNative.exe was rebuilt after the running window closed and passed the same plain-board smoke flow (boardStylesTested=1, lastMoveMarker=false). Both SVGs' 36 coordinate and 4 river path bounds were independently checked to within 0.001px.
 
 ## Next work
 
