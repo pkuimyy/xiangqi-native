@@ -31,6 +31,7 @@ namespace drawing = winrt::Microsoft::UI::Xaml::Shapes;
 // Retained board visuals. A position change never tears down the board subtree.
 class BoardView {
   public:
+    static constexpr double width = 450, height = 548, gridOffsetY = 24;
     using PieceFactory = std::function<controls::Canvas(char)>;
     using PieceName = std::function<winrt::hstring(char)>;
     BoardView(controls::Canvas const &root, controls::ControlTemplate const &squareTemplate,
@@ -38,8 +39,8 @@ class BoardView {
         : root_(root), makePiece_(std::move(makePiece)), pieceName_(std::move(pieceName)) {
         pieceAt_.fill(-1);
         for (auto layer : {background_, cells_, piecesLayer_, hints_, annotations_}) {
-            layer.Width(450);
-            layer.Height(500);
+            layer.Width(width);
+            layer.Height(height);
             layer.ChildrenTransitions(media::Animation::TransitionCollection{});
             root_.Children().Append(layer);
         }
@@ -47,17 +48,12 @@ class BoardView {
         piecesLayer_.IsHitTestVisible(false);
         hints_.IsHitTestVisible(false);
         annotations_.IsHitTestVisible(false);
-        grid_.Width(450);
-        grid_.Height(500);
-        grid_.Source(media::Imaging::SvgImageSource(
-            winrt::Windows::Foundation::Uri(L"ms-appx:///assets/board-grid.svg")));
+        grid_.Width(width);
+        grid_.Height(height);
+        for (int i = 0; i < 2; ++i)
+            gridSources_[i].UriSource(winrt::Windows::Foundation::Uri(
+                i ? L"ms-appx:///assets/board-grid-flipped.svg" : L"ms-appx:///assets/board-grid.svg"));
         background_.Children().Append(grid_);
-        rivers_.push_back(label(L"楚 河", 72, 229, 28));
-        rivers_.push_back(label(L"漢 界", 322, 229, 28));
-        for (int f = 0; f < 9; ++f) {
-            top_.push_back(label(L"", 20 + f * 50, 0, 12));
-            bottom_.push_back(label(L"", 19 + f * 50, 481, 12));
-        }
         buttons_.reserve(90);
         dots_.reserve(90);
         for (int s = 0; s < 90; ++s) {
@@ -87,14 +83,6 @@ class BoardView {
             hints_.Children().Append(dot);
             dots_.push_back(dot);
         }
-        // Last-move decoration is separate from hit buttons and selected artwork.
-        lastMove_.Width(48);
-        lastMove_.Height(48);
-        lastMove_.Fill(nullptr);
-        lastMove_.Stroke(color(126, 111, 161));
-        lastMove_.StrokeThickness(1.5);
-        lastMove_.Visibility(xaml::Visibility::Collapsed);
-        hints_.Children().Append(lastMove_);
     }
 
     void render(Json const &position, Json const &node, int selected, bool flipped, bool bamboo) {
@@ -159,7 +147,6 @@ class BoardView {
             for (auto &move : position.at("moves"))
                 if (move.at("from") == selected)
                     legal.at(move.at("to").get<int>()) = true;
-        int last = node.at("move").is_null() ? -1 : node.at("move").at("to").get<int>();
         for (int s = 0; s < 90; ++s) {
             bool hint = legal[s] && !next[s];
             if (hint != hinted_[s]) {
@@ -168,14 +155,6 @@ class BoardView {
             }
         }
 
-        if (last >= 0 && (last != lastMoveSquare_ || geometryChanged)) {
-            auto p = point(last, flipped, bamboo);
-            controls::Canvas::SetLeft(lastMove_, p.first - 24);
-            controls::Canvas::SetTop(lastMove_, p.second - 24);
-        }
-        lastMoveSquare_ = last;
-        lastMove_.Visibility(last >= 0 && last != selected ? xaml::Visibility::Visible
-                                                           : xaml::Visibility::Collapsed);
         const auto &meta = node.at("meta");
         auto shapes = meta.value("shapes", Json::array());
         auto best = meta.contains("eval") ? meta["eval"].value("bestmove", std::string{}) : std::string{};
@@ -195,7 +174,6 @@ class BoardView {
         int index = pieceAt_.at(s);
         return index >= 0 ? pieces_[index].frame : controls::Canvas{nullptr};
     }
-    xaml::Visibility last_move_visibility() const { return lastMove_.Visibility(); }
     controls::Image grid_image() const { return grid_; }
     std::size_t square_count() const { return buttons_.size(); }
     std::size_t piece_visual_count() const { return pieces_.size(); }
@@ -213,7 +191,7 @@ class BoardView {
     };
     controls::Canvas root_, background_, cells_, piecesLayer_, hints_, annotations_;
     controls::Image grid_;
-    std::vector<controls::TextBlock> rivers_, top_, bottom_;
+    std::array<media::Imaging::SvgImageSource, 2> gridSources_;
     std::vector<controls::Button> buttons_;
     std::vector<drawing::Ellipse> dots_;
     std::vector<Piece> pieces_;
@@ -222,8 +200,6 @@ class BoardView {
     std::array<char, 90> displayed_{};
     std::array<int, 90> pieceAt_;
     std::array<bool, 90> hinted_{};
-    drawing::Ellipse lastMove_;
-    int lastMoveSquare_ = -1;
     media::ImageBrush bambooBrush_{nullptr};
     bool ready_ = false, flipped_ = false, bamboo_ = false;
     std::string annotationKey_;
@@ -257,16 +233,6 @@ class BoardView {
         }
         return squares;
     }
-    controls::TextBlock label(std::wstring const &text, double x, double y, double size) {
-        controls::TextBlock result;
-        result.Text(text);
-        result.FontFamily(media::FontFamily(L"SimSun"));
-        result.FontSize(size);
-        controls::Canvas::SetLeft(result, x);
-        controls::Canvas::SetTop(result, y);
-        background_.Children().Append(result);
-        return result;
-    }
     void update_background(bool bamboo) {
         if (bamboo) {
             if (!bambooBrush_) {
@@ -278,17 +244,7 @@ class BoardView {
             root_.Background(bambooBrush_);
         } else
             root_.Background(color(245, 246, 248));
-        auto visible = bamboo ? xaml::Visibility::Collapsed : xaml::Visibility::Visible;
-        grid_.Visibility(visible);
-        auto ink = bamboo ? color(48, 76, 50) : color(99, 110, 125);
-        for (auto label : rivers_) {
-            label.Visibility(visible);
-            label.Foreground(ink);
-        }
-        for (auto label : top_)
-            label.Foreground(ink);
-        for (auto label : bottom_)
-            label.Foreground(ink);
+        grid_.Visibility(bamboo ? xaml::Visibility::Collapsed : xaml::Visibility::Visible);
     }
     static std::pair<double, double> point(int square, bool flipped, bool bamboo) {
         int file = square % 9, rank = square / 9;
@@ -297,15 +253,11 @@ class BoardView {
             rank = 9 - rank;
         }
         if (bamboo)
-            return {450.0 * (32.0 + 58.875 * file) / 537.0, 500.0 * (32.0 + 59.222222 * (9 - rank)) / 600.0};
-        return {25.0 + file * 50, 25.0 + (9 - rank) * 50};
+            return {width * (32.0 + 58.875 * file) / 537.0, height * (32.0 + 59.222222 * (9 - rank)) / 600.0};
+        return {25.0 + file * 50, 25.0 + gridOffsetY + (9 - rank) * 50};
     }
     void update_geometry(bool flipped, bool bamboo) {
-        const std::wstring numbers = L"九八七六五四三二一";
-        for (int f = 0; f < 9; ++f) {
-            top_[f].Text(std::to_wstring(flipped ? 9 - f : f + 1));
-            bottom_[f].Text(std::wstring(1, numbers[flipped ? 8 - f : f]));
-        }
+        grid_.Source(gridSources_[flipped ? 1 : 0]);
         for (int s = 0; s < 90; ++s) {
             auto p = point(s, flipped, bamboo);
             controls::Canvas::SetLeft(buttons_[s], p.first - 24);

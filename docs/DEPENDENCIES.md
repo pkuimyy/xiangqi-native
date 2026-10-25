@@ -5,7 +5,7 @@
 | Rules/FEN/Chinese notation C++ port | @weshell/xiangqi.js 1.0.3 from original package lock | BSD-2-Clause, licenses/xiangqi.js-LICENSE |
 | PGN/comment metadata/Walker C++ port | obsidian-xiangqi c6f2197 | GPL-3.0, repository LICENSE |
 | Bamboo board and grid geometry | obsidian-xiangqi c6f2197 | Original repository GPL-3.0 |
-| Piece SVGs | User-selected local OXDF-editor/assets/pieces | User-provided assets; see provenance below |
+| Piece SVGs and river outlines | User-selected local OXDF-editor/assets/pieces and assets/board.svg | User-provided assets; see provenance below |
 | OXQF model and codecs | FetchContent, pkuimyy/OXQF 206f807f8083ae0ec9384499a35313cb97c7a199 | MIT, fetched upstream LICENSE |
 | JSON for Modern C++ | 3.12.0, vendored header | MIT, external/json/LICENSE.MIT |
 | WinUI | Microsoft.WindowsAppSDK.WinUI 1.8.260803003 | NuGet package license |
@@ -16,7 +16,7 @@ Original application: https://github.com/west-shell/obsidian-xiangqi/tree/c6f219
 
 The 14 assets/pieces/{red,black}_*.svg files are copied byte-for-byte from the user-selected C:\Users\yy_1070\project\OXDF-editor\assets\pieces directory (source repository HEAD 83d0bec at copy time). Their path-based glyphs and artwork are loaded directly by WinUI SvgImageSource. No font substitution or glyph redrawing is used; the native image container only crops transparent outer margins.
 
-The wood image and previous traditional SVG set are removed from source and app outputs. The default board is a flat native brush. board-grid.svg retains the original GRID_SVG paths with a neutral palette and native river labels. The internal-only bamboo.jpg resource is copied unchanged and already contains its own grid/river artwork. Its renderer is retained for future use, with no user-facing selector.
+The wood image and previous traditional SVG set are removed from source and app outputs. The default board is a flat native brush. board-lines.svg retains the original GRID_SVG paths with a neutral palette. board-river.svg preserves the two original lettering paths from OXDF-editor/assets/board.svg (83d0bec). scripts/generate-board.ps1 centres these by their actual vector bounds and combines them with outlined Segoe UI/Microsoft YaHei coordinate glyphs into board-grid.svg and board-grid-flipped.svg; the application does not load fonts for this artwork. The internal-only bamboo.jpg resource is copied unchanged and already contains its own grid/river artwork. Its renderer is retained for future use, with no user-facing selector.
 
 Pikafish archive: https://github.com/official-pikafish/Pikafish/releases/download/Pikafish-2026-09-06/Pikafish.2026-09-06.7z
 

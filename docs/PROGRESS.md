@@ -8,7 +8,7 @@ Date: 2026-10-25. The current checkpoint implements the user's C++-only requirem
 - Native C++ rules/FEN, Chinese/WXF/ICCS notation, PGN/comment metadata and Walker layout.
 - QuickJS, JS/TS sources, generated bundles, npm manifests and Node CI steps removed.
 - Only the flat native board is exposed to users; custom/bamboo rendering stays internal. All 14 OXDF-editor SVG pieces remain unchanged. Wood and old traditional piece assets are removed.
-- Native vector pieces, board click-to-move/flip, legal dots, last-move highlights, annotations and best-move arrows.
+- Native vector pieces, board click-to-move/flip, legal dots, annotations and best-move arrows; no automatic last-move marking.
 - WinUI native side toolbar, FEN copy, evaluation strip, compact branch graph and two-column Chinese move list.
 - Multiple games; navigation, branch deletion/promotion, comments, undo/redo.
 - OXQF authoritative model, fetched directly at 206f807 from pkuimyy/OXQF; rich metadata and unknown annotations preserved.
@@ -64,6 +64,14 @@ Four native tests and the same-directory temporary UI verification passed. The U
 The last-destination outline now belongs to a dedicated noninteractive ellipse in the retained hints layer. Selecting that piece collapses the outline; input buttons keep zero borders and no shadow. The selected SVG still scales in place to 110%, with no visual-tree rebuild.
 
 Added a regression that moves a cannon, gives its destination pointer focus, selects/deselects it twice, and checks marker visibility, zero button border/shadow and retained piece identity. The Release verification executable and the rebuilt standard build/winui/Release/XiangqiNative.exe both passed the actual WinUI smoke flow, including the new recentMoveSelection regression. The captured recent-move-selected-preview.png confirms no surrounding outline.
+
+## SVG board layout (2026-10-25)
+
+Combined the original grid, OXDF-editor river lettering paths and outlined file coordinates into self-contained normal/flipped SVGs. The canvas is 450x548 with 24px top/bottom gutters; the river pairs are centred by their actual vector bounds at (125,274) and (325,274). Coordinate rows at y=12/536 have at least 6.25px clearance from a selected 49.5px piece frame. See BOARD_GEOMETRY.md and scripts/generate-board.ps1.
+
+Removed native river/coordinate TextBlocks and all automatic last-move decoration. Retained grid/piece/button identities and move/capture/undo behavior are unchanged. The UI smoke flow now exercises only the plain board, including flip and repeated selection of the recently moved piece; it no longer enters the bamboo theme.
+
+Release verification passed and both orientation screenshots were inspected. Standard Release deployment is pending closure of the running window.
 
 ## Next work
 

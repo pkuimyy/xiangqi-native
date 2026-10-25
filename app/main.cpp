@@ -391,8 +391,8 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         turn.FontSize(18);
         leftPanel.Children().Append(turn);
         board.ChildrenTransitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
-        board.Width(450);
-        board.Height(500);
+        board.Width(xqn::ui::BoardView::width);
+        board.Height(xqn::ui::BoardView::height);
         board.Background(brush(245, 246, 248));
         Viewbox view;
         view.Stretch(Stretch::Uniform);
@@ -977,16 +977,13 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             if (boardView->piece(67) != movingCannon || boardView->piece(70) ||
                 movingCannon.Parent() != movingParent)
                 throw std::runtime_error("Moved SVG visual was not reused");
-            if (boardView->last_move_visibility() != Visibility::Visible)
-                throw std::runtime_error("Last-move marker missing after move");
             for (int repeat = 0; repeat < 2; ++repeat) {
                 boardView->square(67).Focus(FocusState::Pointer);
                 invoke_square(67);
                 co_await winrt::resume_after(std::chrono::milliseconds(30));
                 co_await ui;
                 auto border = boardView->square(67).BorderThickness();
-                if (selected != 67 || boardView->last_move_visibility() != Visibility::Collapsed ||
-                    border.Left || border.Top || border.Right || border.Bottom ||
+                if (selected != 67 || border.Left || border.Top || border.Right || border.Bottom ||
                     boardView->square(67).Shadow())
                     throw std::runtime_error("Recently moved selection retained a decoration");
                 verifyRetained();
@@ -997,8 +994,8 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                 invoke_square(67);
                 co_await winrt::resume_after(std::chrono::milliseconds(30));
                 co_await ui;
-                if (selected != -1 || boardView->last_move_visibility() != Visibility::Visible)
-                    throw std::runtime_error("Last-move marker not restored after deselection");
+                if (selected != -1)
+                    throw std::runtime_error("Recently moved piece did not deselect");
             }
             doc().select(beforeClick);
             refresh();
@@ -1028,15 +1025,17 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             if (!failedPieceArt.empty() || loadedPieceArt.size() != 14)
                 throw std::runtime_error("OXDF SVG resources failed to decode");
             co_await capture_preview(directory / L"native-preview.png");
-            bamboo = true; // Internal rendering check; no public style selector.
             flipped = true;
             draw_board();
             refresh_evaluation_strip();
             co_await winrt::resume_after(std::chrono::milliseconds(300));
             co_await ui;
-            co_await capture_preview(directory / L"internal-bamboo-preview.png");
+            verifyRetained();
+            if (boardView->grid_image().Source().as<SvgImageSource>().UriSource().Path() !=
+                L"/assets/board-grid-flipped.svg")
+                throw std::runtime_error("Flipped SVG coordinates were not loaded");
+            co_await capture_preview(directory / L"flipped-preview.png");
             flipped = false;
-            bamboo = false;
             refresh();
 
             xqn::save_atomic(directory / L"result.json",
@@ -1051,7 +1050,8 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                                              {"boardClick", true},
                                              {"pieceResources", loadedPieceArt.size()},
                                              {"visibleBoardStyles", 1},
-                                             {"internalBoardStylesTested", 2},
+                                             {"boardStylesTested", 1},
+                                             {"lastMoveMarker", false},
                                              {"recentMoveSelection", true},
                                              {"selectionScale", 1.10}}
                                        .dump(2)));

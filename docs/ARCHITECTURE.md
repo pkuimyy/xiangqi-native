@@ -20,21 +20,21 @@ CMake generates per-configuration NativeCore.props with target-derived headers, 
 
 ## Native visuals
 
-The user interface provides only the plain board with a flat native brush and neutral SVG grid. There is no board-style selector or setting. The existing bamboo/custom-board rendering path and its calibrated coordinates remain internal, with no duplicate grid overlay; they are exercised directly by the smoke test.
+The user interface provides only the plain board with a flat native brush and neutral SVG grid. There is no board-style selector or setting. The existing bamboo/custom-board rendering path and its calibrated coordinates remain internal, with no duplicate grid overlay; they are deliberately excluded from tests at the user's request.
 
 The 14 OXDF-editor SVG pieces are copied unchanged from the user's selected directory. Their glyphs are paths, so WinUI SvgImageSource renders them directly instead of reconstructing circles/text. A clipped native Canvas crops transparent outer margins from the 96x96 documents. Native load events verify all 14 resources decode successfully in the UI smoke test. Missing resource files fail startup explicitly.
 
-Chess-square Button controls use a static ContentPresenter template with empty control/content/children transitions. Position updates are immediate. Only the unselected last destination has a thin outline rendered by a dedicated noninteractive ellipse in the hints layer; it is collapsed when that square is selected. Hit buttons always have zero border thickness and no shadow; there is no origin fill, tween, fade or hover/press backdrop. Selected piece artwork uses a centred 1.10 ScaleTransform, without changing the hit area or layout position. Selection has no separate outline, and cancelling selection restores the original size. System keyboard focus visuals are retained. Native Button controls supply focus, input and accessibility names; the compact branch tree and two-column move list also use Buttons. Viewbox scales the board; evaluation-strip proportions reflect the original winning-chance mapping. There is no HTML/CSS layout.
+Chess-square Button controls use a static ContentPresenter template with empty control/content/children transitions. Position updates are immediate. There is no automatic last-move marker. Hit buttons always have zero border thickness and no shadow; there is no origin fill, tween, fade or hover/press backdrop. Selected piece artwork uses a centred 1.10 ScaleTransform, without changing the hit area or layout position. Selection has no separate outline, and cancelling selection restores the original size. System keyboard focus visuals are retained. Native Button controls supply focus, input and accessibility names; the compact branch tree and two-column move list also use Buttons. Viewbox scales the board; evaluation-strip proportions reflect the original winning-chance mapping. There is no HTML/CSS layout.
 
 ### Retained board rendering
 
-app/board_view.hpp keeps five layers: background/grid, 90 input buttons, piece visuals, legal destinations and annotations. Normal moves never clear the board subtree. The grid source, labels, buttons, hint dots and standard game's 32 SVG piece objects are allocated once.
+app/board_view.hpp keeps five layers: background/grid, 90 input buttons, piece visuals, legal destinations and annotations. Normal moves never clear the board subtree. The grid sources (normal/flipped), buttons, hint dots and standard game's 32 SVG piece objects are allocated once.
 
 Position differences update only changed square ownership and accessibility names. A moving piece stays attached to the same piece layer; only its Canvas coordinates change. Captures collapse the existing visual and undo reuses it. Selection updates the existing centred scale transform, without replacing the Image or its Source.
 
-Background resources change only when the internal board style changes. Orientation changes update coordinates and coordinate labels. Annotation children rebuild only when shape/best-move metadata or orientation changes; other board layers remain connected.
+Background resources change only when the internal board style changes. Orientation changes update piece/input coordinates and select the cached normal/flipped SVG, which includes outlined river lettering and file labels. The 450x548 canvas adds 24px gutters above/below the original 450x500 grid; see BOARD_GEOMETRY.md. Annotation children rebuild only when shape/best-move metadata or orientation changes; other board layers remain connected.
 
-The window smoke test verifies stable grid/button/unchanged-piece identities, the moving piece's identity and parent, stable allocation counts, capture and undo, selection and cancellation, and repeated pointer-focused selection of the most recently moved piece with its destination marker hidden. This guards against the original whole-board teardown and asynchronous SVG reload path. Full model projection and sidebar graph rebuilds remain separate performance work.
+The window smoke test verifies stable grid/button/unchanged-piece identities, the moving piece's identity and parent, stable allocation counts, capture and undo, selection and cancellation, and repeated pointer-focused selection of the most recently moved piece with no automatic last-move marker. This guards against the original whole-board teardown and asynchronous SVG reload path. Full model projection and sidebar graph rebuilds remain separate performance work.
 
 ## Persistent metadata
 
@@ -62,4 +62,4 @@ Scores are converted to Red's viewpoint. A generation token plus document/node i
 
 Native CTest covers document edits/save, UCI protocol and deterministic migration fixtures. The golden JSON was generated from the pinned original implementation before removing JS. It compares legal move sets, Chinese notation, resulting FENs, checks, PGN trees/metadata/stringification and Walker coordinates.
 
-The WinUI smoke test invokes board Buttons through their own automation peers, saves/reopens OXQ, exercises the hidden custom-board renderer directly, captures selected and deselected piece states, flips the board and captures its own visual tree. It does not automate unrelated applications.
+The WinUI smoke test invokes board Buttons through their own automation peers, saves/reopens OXQ, uses only the plain board, captures selected and deselected piece states, flips the board and captures its own visual tree. It does not automate unrelated applications.
