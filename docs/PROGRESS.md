@@ -95,6 +95,16 @@ Added docs/PIKAFISH_GUIDE.md with setup, a depth-6 first run, Red-view scores, s
 
 Release compilation and the lightweight preview passed: the actual board remained 450x548 logical pixels on this monitor across compact, half, wide and Analysis views. Final compact/half/wide/analysis captures were inspected and saved under docs/assets; the full regression suite remains deferred during layout review.
 
+## Centred research layout and live Pikafish (2026-10-26)
+
+Kept fixed board/input dimensions and replaced fixed full-window study cards with a centred group: board, move list and a flexible 300..600px research column on wide windows. Tree, permanent analysis card and larger always-open notes share that column; compact windows keep the same controls in the sidebar. Short move/tree cards shrink to their content.
+
+Replaced manual analysis controls with a persistent switch and live score/depth/Chinese-PV panel. Native go-infinite streaming runs on a cancellable background worker with 250ms debounce, warm engine reuse and 150ms update throttling. One thread/32MB Hash/below-normal priority keep the default resource policy modest. Switch/path preferences persist outside document state.
+
+Live progress is cached by node/FEN and does not modify metadata, dirty state or undo. Explicit save/export includes the current node's latest result. Old requests are rejected by revision and node/FEN checks. Flip does not restart analysis; quick navigation cancels and debounces it.
+
+The native.engine and new native.live-analysis tests passed, covering stream/stop/reuse, latest-position scores, debounce, errors and cancellation during stalled startup. Actual bundled Pikafish returned live results in WinUI, followed navigation, preserved document metadata/dirty state and exported the current evaluation; the board remained 450x548 on this monitor across five previews. Final centred alignment and all five captures were inspected; updated previews are saved under docs/assets. The exact standard Release executable passed these checks. Full rules/PGN suites remain deferred during UI review.
+
 ## Next work
 
 1. Drag/drop moves, arrow/highlight editing, annotation toggles, result controls, branch folding and keyboard interaction coverage.

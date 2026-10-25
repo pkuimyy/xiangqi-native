@@ -37,10 +37,9 @@ struct WorkspaceWidgets {
     sc::StackPanel moves;
     sc::Grid turnStrip;
     sc::Border turnIndicator;
-    sc::TextBlock turn, evaluation, status;
+    sc::TextBlock turn, evaluation, status, analysisState, variation;
     sc::TextBox comment, notation;
-    sc::NumberBox depth;
-    sc::Button analyze;
+    sc::ToggleSwitch analysis;
 };
 
 // A provisional native shell; document operations remain owned by Workspace.
@@ -78,14 +77,14 @@ class WorkspaceLayout {
         content_.Children().Append(sidebar_);
         sc::Grid::SetColumn(wideTree_, 2);
         content_.Children().Append(wideTree_);
-        sc::ScrollViewer workspaceScroll;
-        workspaceScroll.Content(content_);
-        workspaceScroll.HorizontalContentAlignment(sx::HorizontalAlignment::Left);
-        workspaceScroll.VerticalContentAlignment(sx::VerticalAlignment::Top);
-        workspaceScroll.HorizontalScrollBarVisibility(sc::ScrollBarVisibility::Auto);
-        workspaceScroll.VerticalScrollBarVisibility(sc::ScrollBarVisibility::Auto);
-        sc::Grid::SetRow(workspaceScroll, 2);
-        root_.Children().Append(workspaceScroll);
+
+        workspaceScroll_.Content(content_);
+        workspaceScroll_.HorizontalContentAlignment(sx::HorizontalAlignment::Left);
+        workspaceScroll_.VerticalContentAlignment(sx::VerticalAlignment::Top);
+        workspaceScroll_.HorizontalScrollBarVisibility(sc::ScrollBarVisibility::Auto);
+        workspaceScroll_.VerticalScrollBarVisibility(sc::ScrollBarVisibility::Auto);
+        sc::Grid::SetRow(workspaceScroll_, 2);
+        root_.Children().Append(workspaceScroll_);
         w_.status.FontSize(11);
         w_.status.Foreground(ink(105, 110, 120));
         w_.status.TextTrimming(sx::TextTrimming::CharacterEllipsis);
@@ -99,29 +98,57 @@ class WorkspaceLayout {
 
     void show_analysis() { select_ribbon(1); }
 
+    void fit_content(double moves, double tree) {
+        moveExtent_ = moves;
+        treeExtent_ = tree;
+        adapt();
+    }
     void adapt() {
         double width = root_.ActualWidth();
         if (width <= 0)
             return;
         bool wide = width >= 1120;
-        content_.ColumnDefinitions().GetAt(1).Width(sx::GridLength{width < 720 ? 228.0
-                                                                   : wide      ? 280.0
-                                                                               : 252.0,
-                                                                   sx::GridUnitType::Pixel});
-        content_.ColumnDefinitions().GetAt(2).Width(
-            sx::GridLength{wide ? 300.0 : 0.0, sx::GridUnitType::Pixel});
-        double sidebarWidth = width < 720 ? 228.0 : wide ? 280.0 : 252.0;
-        content_.Width(boardWidth_ + sidebarWidth + (wide ? 300.0 : 0.0) + 24);
+        double sidebarWidth = wide ? (std::clamp)((width - boardWidth_) * .30, 260.0, 320.0)
+                                   : (std::clamp)(width - boardWidth_ - 48.0, 228.0, 320.0);
+        double researchWidth =
+            wide ? (std::clamp)(width - boardWidth_ - sidebarWidth - 48.0, 300.0, 600.0) : 0;
+        double desiredWidth = boardWidth_ + sidebarWidth + researchWidth + 24;
+        double bodyHeight =
+            (std::max)(boardWidth_ * 548.0 / 466.0 + 72, (std::min)(900.0, root_.ActualHeight() - 130));
+        content_.Width(desiredWidth);
+        content_.Height(bodyHeight);
+        content_.ColumnDefinitions().GetAt(1).Width(sx::GridLength{sidebarWidth, sx::GridUnitType::Pixel});
+        content_.ColumnDefinitions().GetAt(2).Width(sx::GridLength{researchWidth, sx::GridUnitType::Pixel});
+        double gutter = (std::max)(0.0, (width - 24 - desiredWidth) / 2);
+        content_.HorizontalAlignment(sx::HorizontalAlignment::Left);
+        content_.Margin(sx::Thickness{gutter, 0, gutter, 0});
+        workspaceScroll_.HorizontalContentAlignment(sx::HorizontalAlignment::Left);
+        boardPane_.VerticalAlignment(wide ? sx::VerticalAlignment::Center : sx::VerticalAlignment::Top);
         if (wide != wide_) {
             if (wide) {
-                studyViews_.Children().RemoveAt(1);
-                wideTreeBody_.Children().Append(treeCard_);
+                move_card(treeCard_, studyViews_, wideTreeBody_, 0);
+                move_card(analysisCard_, sidebar_, wideTreeBody_, 1);
+                move_card(notesCard_, sidebar_, wideTreeBody_, 2);
             } else {
-                wideTreeBody_.Children().RemoveAt(0);
-                studyViews_.Children().Append(treeCard_);
+                move_card(treeCard_, wideTreeBody_, studyViews_, 0);
+                move_card(analysisCard_, wideTreeBody_, sidebar_, 3);
+                move_card(notesCard_, wideTreeBody_, sidebar_, 4);
             }
             wide_ = wide;
         }
+        double noteHeight = wide ? (std::clamp)(bodyHeight * .30, 200.0, 300.0) : 176;
+        double analysisHeight = 144;
+        sidebar_.Height(wide ? boardWidth_ * 548.0 / 466.0 + 72 : bodyHeight);
+        sidebar_.VerticalAlignment(wide ? sx::VerticalAlignment::Center : sx::VerticalAlignment::Top);
+        notesCard_.Height(noteHeight);
+        w_.comment.Height(noteHeight - 92);
+        analysisCard_.Height(analysisHeight);
+        w_.variation.MaxLines(wide ? 3 : 2);
+        double studyHeight = wide ? bodyHeight - 40 : bodyHeight - noteHeight - analysisHeight - 96;
+        moveCard_.MaxHeight((std::max)(80.0, (std::min)(moveExtent_, studyHeight)));
+        treeCard_.Height((std::max)(
+            120.0,
+            (std::min)(treeExtent_, wide ? bodyHeight - noteHeight - analysisHeight - 56 : studyHeight)));
         wideTree_.Visibility(wide ? sx::Visibility::Visible : sx::Visibility::Collapsed);
         studySwitch_.Visibility(wide ? sx::Visibility::Collapsed : sx::Visibility::Visible);
         select_study(treeSelected_);
@@ -129,14 +156,23 @@ class WorkspaceLayout {
 
   private:
     sc::Grid root_, content_, boardPane_, sidebar_, studyViews_, wideTree_, wideTreeBody_;
-    sc::Border treeCard_, moveCard_;
+    sc::Border treeCard_, moveCard_, analysisCard_, notesCard_;
+    sc::ScrollViewer workspaceScroll_;
     sc::StackPanel studySwitch_;
     WorkspaceWidgets w_;
     std::function<void(ShellCommand)> command_;
     std::array<sc::CommandBar, 3> ribbons_;
     std::vector<sc::Primitives::ToggleButton> tabs_, studyTabs_;
     double boardWidth_;
+    double moveExtent_ = 100, treeExtent_ = 180;
     bool wide_ = false, treeSelected_ = false;
+    static void move_card(sc::Border card, sc::Grid from, sc::Grid to, int row) {
+        uint32_t index;
+        if (from.Children().IndexOf(card, index))
+            from.Children().RemoveAt(index);
+        sc::Grid::SetRow(card, row);
+        to.Children().Append(card);
+    }
     static sm::SolidColorBrush ink(unsigned r, unsigned g, unsigned b) {
         return sm::SolidColorBrush(winrt::Windows::UI::Color{
             255, static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
@@ -236,20 +272,13 @@ class WorkspaceLayout {
         add(0, L"提升主线", sc::Symbol::Up, ShellCommand::Promote);
         add(0, L"删除分支", sc::Symbol::Delete, ShellCommand::Erase);
         add(1, L"选择引擎", sc::Symbol::Setting, ShellCommand::Engine);
-        sc::AppBarElementContainer depthContainer;
-        sc::StackPanel depthRow;
-        depthRow.Orientation(sc::Orientation::Horizontal);
-        depthRow.Spacing(6);
-        depthRow.Margin(sx::Thickness{8, 0, 8, 0});
-        depthRow.Children().Append(text(L"深度", 12));
-        w_.depth.Width(84);
-        depthRow.Children().Append(w_.depth);
-        depthContainer.Content(depthRow);
-        ribbons_[1].PrimaryCommands().Append(depthContainer);
-        sc::AppBarElementContainer analyzeContainer;
-        analyzeContainer.Content(w_.analyze);
-        ribbons_[1].PrimaryCommands().Append(analyzeContainer);
-        add(1, L"停止", sc::Symbol::Stop, ShellCommand::Stop);
+        sc::AppBarElementContainer explanation;
+        auto message = text(L"常驻局面分析 · 单线程 · 后台运行", 12);
+        message.Margin(sx::Thickness{12, 0, 12, 0});
+        explanation.Height(48);
+        explanation.VerticalContentAlignment(sx::VerticalAlignment::Center);
+        explanation.Content(message);
+        ribbons_[1].PrimaryCommands().Append(explanation);
         add(2, L"翻转棋盘", sc::Symbol::Refresh, ShellCommand::Flip);
         add(2, L"复制 FEN", sc::Symbol::Copy, ShellCommand::CopyFen);
         ribbonCard.Height(48);
@@ -400,24 +429,67 @@ class WorkspaceLayout {
             card.BorderBrush(ink(226, 228, 232));
             card.BorderThickness(sx::Thickness{1});
             card.CornerRadius(sx::CornerRadius{6});
+            card.VerticalAlignment(sx::VerticalAlignment::Top);
             studyViews_.Children().Append(card);
         }
         sc::Grid::SetRow(studyViews_, 2);
         sidebar_.Children().Append(studyViews_);
-        w_.evaluation.FontSize(12);
-        w_.evaluation.Foreground(ink(90, 98, 110));
-        w_.evaluation.TextWrapping(sx::TextWrapping::Wrap);
-        w_.evaluation.MaxLines(2);
-        w_.evaluation.Height(32);
-        sc::Grid::SetRow(w_.evaluation, 3);
-        sidebar_.Children().Append(w_.evaluation);
-        sc::Border notesCard;
-        notesCard.Background(ink(250, 250, 250));
-        notesCard.CornerRadius(sx::CornerRadius{6});
-        notesCard.BorderBrush(ink(226, 228, 232));
-        notesCard.BorderThickness(sx::Thickness{1});
-        notesCard.Padding(sx::Thickness{12});
-        notesCard.Height(176);
+
+        analysisCard_.Background(ink(250, 250, 250));
+        analysisCard_.BorderBrush(ink(226, 228, 232));
+        analysisCard_.BorderThickness(sx::Thickness{1});
+        analysisCard_.CornerRadius(sx::CornerRadius{6});
+        analysisCard_.Padding(sx::Thickness{10});
+        analysisCard_.Height(144);
+        sc::Grid analysis;
+        analysis.RowSpacing(4);
+        for (auto height :
+             {sx::GridLength{28, sx::GridUnitType::Pixel}, sx::GridLength{16, sx::GridUnitType::Pixel},
+              sx::GridLength{22, sx::GridUnitType::Pixel}, sx::GridLength{1, sx::GridUnitType::Star}}) {
+            sc::RowDefinition row;
+            row.Height(height);
+            analysis.RowDefinitions().Append(row);
+        }
+        sc::Grid heading;
+        sc::ColumnDefinition label, control;
+        label.Width(sx::GridLength{1, sx::GridUnitType::Star});
+        control.Width(sx::GridLength{1, sx::GridUnitType::Auto});
+        heading.ColumnDefinitions().Append(label);
+        heading.ColumnDefinitions().Append(control);
+        heading.Children().Append(text(L"局面分析", 13));
+        w_.analysis.MinWidth(0);
+        w_.analysis.Width(48);
+        w_.analysis.OnContent(winrt::box_value(L""));
+        w_.analysis.OffContent(winrt::box_value(L""));
+        sc::ToolTipService::SetToolTip(w_.analysis, winrt::box_value(L"自动分析当前局面"));
+        sc::Grid::SetColumn(w_.analysis, 1);
+        heading.Children().Append(w_.analysis);
+        analysis.Children().Append(heading);
+        w_.analysisState.FontSize(11);
+        w_.analysisState.Foreground(ink(100, 108, 120));
+        w_.analysisState.TextTrimming(sx::TextTrimming::CharacterEllipsis);
+        sc::Grid::SetRow(w_.analysisState, 1);
+        analysis.Children().Append(w_.analysisState);
+        w_.evaluation.FontSize(15);
+        w_.evaluation.TextTrimming(sx::TextTrimming::CharacterEllipsis);
+        sc::Grid::SetRow(w_.evaluation, 2);
+        analysis.Children().Append(w_.evaluation);
+        w_.variation.FontSize(12);
+        w_.variation.Foreground(ink(85, 94, 108));
+        w_.variation.TextWrapping(sx::TextWrapping::Wrap);
+        w_.variation.MaxLines(2);
+        sc::Grid::SetRow(w_.variation, 3);
+        analysis.Children().Append(w_.variation);
+        analysisCard_.Child(analysis);
+        sc::Grid::SetRow(analysisCard_, 3);
+        sidebar_.Children().Append(analysisCard_);
+
+        notesCard_.Background(ink(250, 250, 250));
+        notesCard_.CornerRadius(sx::CornerRadius{6});
+        notesCard_.BorderBrush(ink(226, 228, 232));
+        notesCard_.BorderThickness(sx::Thickness{1});
+        notesCard_.Padding(sx::Thickness{12});
+        notesCard_.Height(176);
         sc::StackPanel notesBody;
         notesBody.Spacing(6);
         notesBody.Children().Append(text(L"当前着注释", 13));
@@ -429,18 +501,26 @@ class WorkspaceLayout {
         auto save = button(L"保存注释", ShellCommand::Comment);
         save.HorizontalAlignment(sx::HorizontalAlignment::Right);
         notesBody.Children().Append(save);
-        notesCard.Child(notesBody);
-        sc::Grid::SetRow(notesCard, 4);
-        sidebar_.Children().Append(notesCard);
+        notesCard_.Child(notesBody);
+        sc::Grid::SetRow(notesCard_, 4);
+        sidebar_.Children().Append(notesCard_);
+
         wideTree_.RowSpacing(8);
-        sc::RowDefinition header, body;
-        header.Height(sx::GridLength{1, sx::GridUnitType::Auto});
-        body.Height(sx::GridLength{1, sx::GridUnitType::Star});
-        wideTree_.RowDefinitions().Append(header);
-        wideTree_.RowDefinitions().Append(body);
-        auto treeTitle = text(L"图形着法树", 16);
+        wideTree_.VerticalAlignment(sx::VerticalAlignment::Center);
+        for (int i = 0; i < 2; ++i) {
+            sc::RowDefinition row;
+            row.Height(sx::GridLength{1, sx::GridUnitType::Auto});
+            wideTree_.RowDefinitions().Append(row);
+        }
+        auto treeTitle = text(L"研究区", 16);
         treeTitle.Height(32);
         wideTree_.Children().Append(treeTitle);
+        wideTreeBody_.RowSpacing(8);
+        for (int i = 0; i < 3; ++i) {
+            sc::RowDefinition row;
+            row.Height(sx::GridLength{1, sx::GridUnitType::Auto});
+            wideTreeBody_.RowDefinitions().Append(row);
+        }
         sc::Grid::SetRow(wideTreeBody_, 1);
         wideTree_.Children().Append(wideTreeBody_);
         wideTree_.Visibility(sx::Visibility::Collapsed);

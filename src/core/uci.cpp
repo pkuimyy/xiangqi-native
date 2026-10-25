@@ -114,9 +114,20 @@ struct UciEngine::Impl {
             }
         }
     }
-    void wait(const std::string &wanted) {
+    void wait(const std::string &wanted, const UciEngine::Cancel &cancel = {}) {
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-        while (line(deadline) != wanted) {
+        while (true) {
+            if (cancel && cancel())
+                throw std::runtime_error("Analysis cancelled");
+            try {
+                if (line((std::min)(deadline, std::chrono::steady_clock::now() +
+                                                  std::chrono::milliseconds(50))) == wanted)
+                    return;
+            } catch (const std::runtime_error &error) {
+                if (std::string(error.what()) != "Engine response timeout" ||
+                    std::chrono::steady_clock::now() >= deadline)
+                    throw;
+            }
         }
     }
     void close() noexcept {
@@ -139,7 +150,8 @@ struct UciEngine::Impl {
     }
 #endif
 };
-UciEngine::UciEngine(const std::filesystem::path &executable) : impl_(std::make_unique<Impl>()) {
+UciEngine::UciEngine(const std::filesystem::path &executable, Cancel cancelled)
+    : impl_(std::make_unique<Impl>()) {
 #ifdef _WIN32
     auto &p = *impl_;
     auto full = std::filesystem::absolute(executable);
@@ -192,9 +204,9 @@ UciEngine::UciEngine(const std::filesystem::path &executable) : impl_(std::make_
     CloseHandle(process.hThread);
     try {
         p.send("uci");
-        p.wait("uciok");
+        p.wait("uciok", cancelled);
         p.send("isready");
-        p.wait("readyok");
+        p.wait("readyok", cancelled);
         p.active = true;
     } catch (...) {
         p.close();
@@ -219,29 +231,42 @@ UciEngine::~UciEngine() {
 void UciEngine::stop() noexcept { impl_->cancelled = true; }
 Json UciEngine::analyze(const std::string &fen, int depth, int skill, int multipv,
                         std::chrono::milliseconds timeout) {
+    return search(fen, depth, skill, multipv, timeout, false, {}, {});
+}
+Json UciEngine::analyze_live(const std::string &fen, Update update, Cancel cancelled) {
+    return search(fen, 0, 20, 1, std::chrono::milliseconds(0), true, std::move(update), std::move(cancelled));
+}
+Json UciEngine::search(const std::string &fen, int depth, int skill, int multipv,
+                       std::chrono::milliseconds timeout, bool continuous, Update update, Cancel cancelled) {
 #ifdef _WIN32
     auto &p = *impl_;
     std::lock_guard operation(p.operation);
     if (!p.active)
         throw std::runtime_error("Engine is not running");
-    if (depth < 1 || depth > 30 || skill < 0 || skill > 20 || multipv < 1 || multipv > 10)
+    if ((!continuous && (depth < 1 || depth > 30)) || skill < 0 || skill > 20 || multipv < 1 || multipv > 10)
         throw std::runtime_error("Engine parameter out of range");
     if (fen.find_first_of("\r\n") != std::string::npos)
         throw std::runtime_error("Invalid engine position");
     p.cancelled = false;
     bool sentStop = false;
-    auto deadline = std::chrono::steady_clock::now() + timeout;
+    auto deadline = continuous ? std::chrono::steady_clock::time_point::max()
+                               : std::chrono::steady_clock::now() + timeout;
     try {
+        if (continuous) {
+            SetPriorityClass(p.process, BELOW_NORMAL_PRIORITY_CLASS);
+            p.send("setoption name Threads value 1");
+            p.send("setoption name Hash value 32");
+        }
         p.send("setoption name Skill Level value " + std::to_string(skill));
         p.send("setoption name MultiPV value " + std::to_string(multipv));
         p.send("isready");
-        p.wait("readyok");
+        p.wait("readyok", [&] { return p.cancelled || (cancelled && cancelled()); });
         p.send("position fen " + fen);
-        p.send("go depth " + std::to_string(depth));
+        p.send(continuous ? "go infinite" : "go depth " + std::to_string(depth));
         Json result = Json::object();
         std::map<int, Json> pv;
         while (true) {
-            if (p.cancelled && !sentStop) {
+            if ((p.cancelled || (cancelled && cancelled())) && !sentStop) {
                 p.send("stop");
                 sentStop = true;
                 deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -269,6 +294,15 @@ Json UciEngine::analyze(const std::string &fen, int depth, int skill, int multip
                 }
                 if (info.contains("score") && info.contains("moves"))
                     pv[index] = info;
+                if (!sentStop && index == 1 && update && info.contains("score") && info.contains("moves") &&
+                    !info["moves"].empty()) {
+                    auto snapshot = result;
+                    snapshot["bestmove"] = info["moves"][0];
+                    snapshot["pvs"] = Json::array();
+                    for (auto &[i, value] : pv)
+                        snapshot["pvs"].push_back(value);
+                    update(snapshot);
+                }
             } else if (line.starts_with("bestmove ")) {
                 if (sentStop)
                     throw std::runtime_error("Analysis cancelled");

@@ -40,9 +40,9 @@ The window smoke test verifies stable grid/button/unchanged-piece identities, th
 
 app/workspace_layout.hpp composes native command tabs (File/Start/Analysis/View), CommandBars with overflow, a fixed-size board Viewbox, navigation below the board, and a study sidebar. Workspace dispatches the commands to the existing document and engine actions.
 
-At widths below 720 effective pixels the sidebar is 228px; at medium widths it is 252px. At 1120px and above it becomes 280px and the existing graph ScrollViewer moves into a separate 300px third column. Narrow layouts switch between moves and graph. The board subtree remains attached throughout. Board viewport dimensions are computed once from the startup monitor/client area. Window resizing and command tabs do not alter them; the workspace scrolls if it does not fit. Five navigation/flip controls, notation input and its submit button share one permanent 32px row. Notes use an always-open fixed-height card, and evaluation text has a reserved height. These values are provisional until user review; draggable dividers and saved pane preferences are not implemented yet.
+Compact layouts keep a 228..320px study column with moves/tree switching, a permanent 144px live-analysis card and notes. At 1120 effective pixels and above, the fixed board, 260..320px move column and 300..600px research column form a centred workspace. The same tree, toggle/result card and note editor move into the research column; their instances and contents are retained. Cards for short move lists and trees fit content. Research notes grow with the available height. The board/input dimensions remain fixed across window changes; small windows scroll.
 
-Default startup approximates half the current monitor width and stays within its working height. --layout-preview captures compact/half/wide/analysis views and verifies that the actual transformed board dimensions remain identical, without running the document/engine regression suite.
+Default startup approximates half the current monitor width. --layout-preview captures compact/half/wide/analysis views, verifies fixed board dimensions, and uses bundled Pikafish to check current-position follow, stale-result isolation and transient/export semantics. Automation skips user preferences.
 
 ## Persistent metadata
 
@@ -60,11 +60,15 @@ Native tree hydration rejects duplicates, cycles, shared children and orphans, w
 
 Core parsing retains collection support. The current UI has one document and no game-count selector. New/open prepares the replacement first, rejects non-single-game input, handles unsaved edits through Save/Discard/Cancel, and then replaces the current document. OXQ save and PGN export act on that document. CBL input currently rejects conversion diagnostics; collection export and diagnostics review are future work.
 
-## UCI
+## UCI and live analysis
 
-CreateProcessW starts the native engine without a shell or visible console. Explicit pipe inheritance, uci/isready handshakes, exact-score filtering, cancellation, timeout and session retirement are native C++.
+CreateProcessW starts the native engine without a shell or console. Explicit pipe inheritance, uci/isready handshakes and exact-score filtering remain native C++. The existing finite analyze API remains available; analyze_live uses go infinite and streams exact primary-PV snapshots. Readiness/startup poll cancellation, and stop has a bounded response wait.
 
-Scores are converted to Red's viewpoint. A generation token plus document/node identity prevents stale analysis from editing another position. Current analysis is FEN-based; preserving game history for repetition context, batch analysis and play against the engine remain future work.
+LiveAnalysis owns a single worker, a warm process and a 250ms latest-position debounce. Updates are throttled to 150ms, marshalled through DispatcherQueue, checked against the current request revision and node/FEN, and converted to Red's viewpoint. All engine startup and work occur off the UI thread. Live search uses one thread, 32MB Hash and below-normal process priority. Focus loss does not interrupt analysis.
+
+The UI caches progress by node/FEN without changing OXQF metadata or undo/dirty state. Board arrows receive a temporary JSON projection; up to eight PV moves are displayed in Chinese. Explicit save/export snapshots include the current cached result. Saving commits that same result to the document after the file write succeeds. Other visited positions' transient results are not automatically batch-persisted.
+
+The switch state and engine path are stored under LOCALAPPDATA/XiangqiNative/settings.json, preserving unknown settings. Automation skips these preferences. New positions cancel obsolete work; board flip changes rendering only. A terminal position does not start a search. Errors remain visible until the user selects an engine, toggles again or changes position. History-aware repetition context, user-configurable resource settings and play against the engine remain future work.
 
 ## Tests
 

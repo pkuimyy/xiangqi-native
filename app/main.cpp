@@ -40,6 +40,7 @@
 #include <winrt/Windows.UI.h>
 #include <winrt/base.h>
 #include <xiangqi/document.hpp>
+#include <xiangqi/live_analysis.hpp>
 #include <xiangqi/uci.hpp>
 
 using namespace winrt;
@@ -188,19 +189,23 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     TextBlock eval;
     TextBox comment;
     TextBox notation;
-    Button analyzeButton;
-    NumberBox depth;
+    ToggleSwitch analysisSwitch;
+    TextBlock analysisState, variation;
     HWND hwnd{};
-    bool flipped{}, allow_close{}, analyzing{};
+    bool flipped{}, allow_close{}, closing{}, automation{};
     int selected = -1;
-    std::uint64_t generation{};
+    std::uint64_t liveRevision{};
+    std::string liveKey;
+    std::wstring liveStatus;
+    std::unordered_map<std::string, xqn::Json> liveCache;
     std::filesystem::path enginePath;
-    std::shared_ptr<xqn::UciEngine> engine;
+    std::unique_ptr<xqn::LiveAnalysis> live;
     xqn::Document &doc() { return docs.at(active); }
     void cancel() {
-        ++generation;
-        if (engine)
-            engine->stop();
+        liveRevision = 0;
+        liveKey.clear();
+        if (live)
+            live->stop();
     }
     void run(const std::function<void()> &action) {
         try {
@@ -296,7 +301,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                 commit_comment();
                 auto file = picker(hwnd, true, L"*.pgn", L"pgn");
                 if (!file.empty())
-                    xqn::save_atomic(file, bytes(doc().pgn()));
+                    xqn::save_atomic(file, bytes(export_document().pgn()));
                 break;
             }
             case C::Undo:
@@ -339,22 +344,21 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                 refresh();
                 break;
             case C::Engine: {
-                if (analyzing)
-                    throw std::runtime_error("Stop analysis before changing engine");
                 auto file = picker(hwnd, false, L"*.exe", L"exe");
                 if (!file.empty()) {
-                    engine.reset();
                     enginePath = file;
+                    save_preferences();
+                    cancel();
+                    refresh_analysis();
                     status.Text(L"已选择：" + file.filename().wstring());
                 }
                 break;
             }
             case C::Analyze:
-                analyze();
+                analysisSwitch.IsOn(true);
                 break;
             case C::Stop:
-                cancel();
-                status.Text(L"正在停止分析…");
+                analysisSwitch.IsOn(false);
                 break;
             case C::CopyFen: {
                 Windows::ApplicationModel::DataTransfer::DataPackage data;
@@ -365,6 +369,158 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             }
             }
         });
+    }
+    std::filesystem::path preferences_path() {
+        wchar_t directory[32768]{};
+        auto length = GetEnvironmentVariableW(L"LOCALAPPDATA", directory, 32768);
+        if (!length || length >= 32768)
+            return {};
+        return std::filesystem::path(directory) / L"XiangqiNative/settings.json";
+    }
+    void load_preferences() {
+        if (automation)
+            return;
+        try {
+            std::ifstream file(preferences_path());
+            if (!file)
+                return;
+            xqn::Json settings;
+            file >> settings;
+            auto path = settings.value("enginePath", std::string{});
+            if (!path.empty() && std::filesystem::is_regular_file(std::filesystem::u8path(path)))
+                enginePath = std::filesystem::u8path(path);
+            analysisSwitch.IsOn(settings.value("liveAnalysis", false));
+        } catch (...) {
+        }
+    }
+    void save_preferences() {
+        if (automation)
+            return;
+        try {
+            auto path = preferences_path();
+            if (path.empty())
+                return;
+            xqn::Json settings = xqn::Json::object();
+            std::ifstream existing(path);
+            if (existing) {
+                try {
+                    existing >> settings;
+                } catch (...) {
+                }
+            }
+            if (!settings.is_object())
+                settings = xqn::Json::object();
+            settings["liveAnalysis"] = analysisSwitch.IsOn();
+            settings["enginePath"] = to_string(enginePath.wstring());
+            std::filesystem::create_directories(path.parent_path());
+            xqn::save_atomic(path, bytes(settings.dump(2)));
+        } catch (...) {
+        }
+    }
+    std::string analysis_key() {
+        return std::to_string(doc().current()) + "|" +
+               doc().node(doc().current()).at("fen").get<std::string>();
+    }
+    xqn::Json cached_evaluation() {
+        auto found = liveCache.find(analysis_key());
+        return found == liveCache.end() ? xqn::Json{} : found->second;
+    }
+    xqn::Json current_evaluation() {
+        auto value = cached_evaluation();
+        if (!value.is_null())
+            return value;
+        auto &meta = doc().node(doc().current()).at("meta");
+        return meta.value("eval", xqn::Json{});
+    }
+    xqn::Document export_document() {
+        auto snapshot = doc();
+        if (auto value = cached_evaluation(); !value.is_null())
+            snapshot.set_evaluation(value);
+        return snapshot;
+    }
+    std::wstring evaluation_text(const xqn::Json &value) {
+        if (!value.is_object() || !value.contains("score"))
+            return L"—";
+        auto score = value.value("score", std::int64_t{0});
+        std::ostringstream text;
+        if (value.value("scoreType", std::string("cp")) == "mate")
+            text << (score >= 0 ? "+M" : "-M") << std::abs(score);
+        else {
+            if (score > 0)
+                text << '+';
+            text << std::fixed << std::setprecision(2) << score / 100.0;
+        }
+        std::wstring result = to_hstring(text.str()).c_str();
+        if (value.contains("depth"))
+            result += L" · 深度 " + std::to_wstring(value["depth"].get<int>());
+        return result;
+    }
+    std::wstring variation_text(const xqn::Json &value) {
+        if (!value.is_object())
+            return {};
+        auto moves = xqn::Json::array();
+        if (value.contains("pvs") && !value["pvs"].empty())
+            moves = value["pvs"][0].value("moves", xqn::Json::array());
+        if (moves.empty() && value.contains("bestmove"))
+            moves.push_back(value["bestmove"]);
+        auto fen = doc().node(doc().current()).at("fen").get<std::string>();
+        std::wstring result;
+        for (std::size_t i = 0; i < moves.size() && i < 8; ++i) {
+            auto notation = moves[i].get<std::string>();
+            try {
+                auto next = kernel.call("move", {{"fen", fen}, {"notation", notation}});
+                if (!result.empty())
+                    result += L"  ";
+                result += to_hstring(next["move"]["zh"].get<std::string>());
+                fen = next["fen"].get<std::string>();
+            } catch (...) {
+                if (result.empty())
+                    result = to_hstring(notation);
+                break;
+            }
+        }
+        return result;
+    }
+    void refresh_analysis() {
+        auto key = analysis_key();
+        bool enabled = analysisSwitch.IsOn() && !closing;
+        if (enabled && liveKey != key) {
+            cancel();
+            liveKey = key;
+            if (enginePath.empty())
+                liveStatus = L"未配置引擎 · 请在分析中选择";
+            else if (doc().position().at("moves").empty())
+                liveStatus = L"当前局面已结束";
+            else {
+                liveStatus = L"等待当前局面…";
+                liveRevision = live->request(enginePath, doc().node(doc().current()).at("fen"));
+            }
+        }
+        auto value = current_evaluation();
+        analysisState.Text(enabled           ? hstring(liveStatus)
+                           : value.is_null() ? L"分析已关闭"
+                                             : L"分析已关闭 · 上次结果");
+        ToolTipService::SetToolTip(analysisState, box_value(analysisState.Text()));
+        eval.Text(evaluation_text(value));
+        auto line = variation_text(value);
+        variation.Text(line.empty() ? (enabled ? L"当前局面计算中…" : L"开启后自动跟随当前局面")
+                                    : hstring(line));
+        ToolTipService::SetToolTip(variation, box_value(line));
+    }
+    void live_event(const xqn::LiveAnalysisEvent &event) {
+        if (closing || !analysisSwitch.IsOn() || event.revision != liveRevision || liveKey != analysis_key())
+            return;
+        using Kind = xqn::LiveAnalysisEvent::Kind;
+        if (event.kind == Kind::Started)
+            liveStatus = L"持续分析 · 单线程";
+        else if (event.kind == Kind::Error)
+            liveStatus = L"分析失败：" + to_hstring(event.message);
+        else {
+            liveCache[liveKey] = event.value;
+            liveStatus = event.kind == Kind::Finished ? L"本次搜索已结束" : L"持续分析 · 单线程";
+        }
+        refresh_analysis();
+        draw_board();
     }
     void initialize() {
         squareTemplate = Markup::XamlReader::Load(LR"XAML(
@@ -394,10 +550,24 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         window.Title(L"象棋 · Xiangqi Native");
         root.RequestedTheme(ElementTheme::Light);
         board.ChildrenTransitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
-        depth.Minimum(1);
-        depth.Maximum(30);
-        depth.Value(15);
-        analyzeButton = button(L"开始分析", [this] { analyze(); });
+        auto arguments = std::wstring(GetCommandLineW());
+        automation = arguments.find(L"--layout-preview") != std::wstring::npos ||
+                     arguments.find(L"--smoke-test") != std::wstring::npos;
+        load_preferences();
+        auto weak = weak_from_this();
+        auto queue = window.DispatcherQueue();
+        live = std::make_unique<xqn::LiveAnalysis>([weak, queue](const auto &event) {
+            queue.TryEnqueue([weak, event] {
+                if (auto self = weak.lock())
+                    self->live_event(event);
+            });
+        });
+        analysisSwitch.Toggled([this](auto &&, auto &&) {
+            save_preferences();
+            cancel();
+            refresh_analysis();
+            draw_board();
+        });
         auto native = window.as<IWindowNative>();
         check_hresult(native->get_WindowHandle(&hwnd));
         double scale = GetDpiForWindow(hwnd) / 96.0;
@@ -419,7 +589,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         shell = std::make_unique<xqn::ui::WorkspaceLayout>(
             root,
             xqn::ui::WorkspaceWidgets{board, graph, moveList, turnStrip, turnIndicator, turn, eval, status,
-                                      comment, notation, depth, analyzeButton},
+                                      analysisState, variation, comment, notation, analysisSwitch},
             boardWidth, [this](xqn::ui::ShellCommand command) { layout_command(command); });
         window.Content(root);
         window.AppWindow().Closing(
@@ -427,8 +597,10 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                 if (!allow_close && dirty()) {
                     args.Cancel(true);
                     confirm_close();
-                } else
+                } else {
+                    closing = true;
                     cancel();
+                }
             });
         root.KeyDown([this](auto &&, Input::KeyRoutedEventArgs const &e) {
             auto focus = Input::FocusManager::GetFocusedElement(root.XamlRoot());
@@ -484,29 +656,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             text += to_hstring(c.get<std::string>());
         }
         comment.Text(text);
-        auto m = doc().node(doc().current()).at("meta");
-        if (m.contains("eval")) {
-
-            auto e = m["eval"];
-            std::ostringstream score;
-            int value = e.value("score", 0);
-            if (e.value("scoreType", std::string("cp")) == "mate") {
-                score << (value >= 0 ? "+M" : "-M") << std::abs(value);
-            } else {
-                if (value > 0)
-                    score << "+";
-                score << std::fixed << std::setprecision(2) << value / 100.0;
-            }
-            int searchDepth = e.value("depth", 0);
-            std::wstring summary = searchDepth > 0 ? L"深度 " + std::to_wstring(searchDepth) : L"已保存评估";
-            summary += L" · " + to_hstring(score.str());
-            auto best = e.value("bestmove", std::string{});
-            if (!best.empty())
-                summary += L" · 最佳走法 " + to_hstring(best);
-            eval.Text(summary);
-
-        } else
-            eval.Text(L"尚无引擎评估");
+        refresh_analysis();
         window.Title(std::wstring(doc().modified() ? L"● " : L"") + L"象棋 · " +
                      (paths[active].empty() ? L"未命名" : paths[active].filename().wstring()));
         status.Text(L"点击棋子选择，点击落点走子；点击分支树节点切换局面。");
@@ -537,7 +687,10 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                 });
         }
         auto pos = doc().position();
-        boardView->render(pos, doc().node(doc().current()), selected, flipped, bamboo);
+        auto node = doc().node(doc().current());
+        if (auto evaluation = current_evaluation(); !evaluation.is_null())
+            node["meta"]["eval"] = evaluation;
+        boardView->render(pos, node, selected, flipped, bamboo);
         bool redToMove = pos.at("turn") == "w";
         refresh_turn_indicator(redToMove);
         turn.Text(redToMove ? L"红方行棋" : L"黑方行棋");
@@ -577,7 +730,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             points[id] = {x, y};
         }
         graph.Width((std::max)(220.0, maxx - minx + 80));
-        graph.Height((std::max)(270.0, maxy + 60));
+        graph.Height((std::max)(120.0, maxy + 60));
         for (auto &n : data.at("nodes"))
             if (!n.at("parent").is_null()) {
                 auto id = n.at("id").get<std::string>();
@@ -692,6 +845,8 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             previousRed = red;
         }
         moveList.Children().Append(moves);
+        if (shell)
+            shell->fit_content(row * 34.0 + 8, graph.Height() + 8);
     }
 
     fire_and_forget open(bool create = false) {
@@ -727,6 +882,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                 }
             }
             cancel();
+            liveCache.clear();
             docs = std::move(opened);
             paths.assign(1, file.extension() == L".oxq" ? file : std::filesystem::path{});
             active = 0;
@@ -747,7 +903,10 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             return;
         if (p.extension() != L".oxq")
             p += L".oxq";
-        xqn::save_atomic(p, doc().oxq());
+        auto saved = export_document();
+        xqn::save_atomic(p, saved.oxq());
+        if (auto value = cached_evaluation(); !value.is_null())
+            doc().set_evaluation(value);
         paths[active] = p;
         doc().mark_saved();
         refresh();
@@ -799,10 +958,13 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             };
             xqn::Json captures = xqn::Json::array();
             double fixedBoardWidth = 0, fixedBoardHeight = 0;
+            bool liveChecked = false, cleanBefore = doc().modified();
+            auto origin = doc().current();
+            auto originalMeta = doc().node(origin).at("meta");
             for (auto size : {Size{640, 640, L"compact-640.png"}, Size{768, 800, L"half-768.png"},
-                              Size{1280, 800, L"wide-1280.png"}, Size{768, 800, L"analysis-768.png"}}) {
+                              Size{1280, 800, L"wide-1280.png"}, Size{1600, 900, L"wide-1600.png"},
+                              Size{768, 800, L"analysis-768.png"}}) {
                 if (std::wstring(size.name) == L"analysis-768.png") {
-                    depth.Value(6);
                     shell->show_analysis();
                 }
                 RECT frame{}, client{};
@@ -824,14 +986,51 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                            std::abs(bounds.Height - fixedBoardHeight) > .01)
                     throw std::runtime_error(
                         "Board changed size while resizing the window or switching commands");
+                if (std::wstring(size.name) == L"analysis-768.png" &&
+                    std::filesystem::is_regular_file(enginePath)) {
+                    analysisSwitch.IsOn(true);
+                    for (int wait = 0; wait < 250 && cached_evaluation().is_null(); ++wait) {
+                        co_await winrt::resume_after(std::chrono::milliseconds(40));
+                        co_await ui;
+                    }
+                    if (cached_evaluation().is_null())
+                        throw std::runtime_error("Live Pikafish did not return a result");
+                    co_await winrt::resume_after(std::chrono::milliseconds(500));
+                    co_await ui;
+                    auto exported = export_document();
+                    if (!exported.node(origin)["meta"].contains("eval") ||
+                        doc().node(origin).at("meta") != originalMeta || doc().modified() != cleanBefore)
+                        throw std::runtime_error(
+                            "Live search modified the document or export omitted its result");
+                    liveChecked = true;
+                }
                 co_await capture_preview(directory / size.name);
                 captures.push_back({{"width", root.ActualWidth()},
                                     {"height", root.ActualHeight()},
                                     {"file", to_string(size.name)}});
             }
+            if (liveChecked) {
+                navigate([this] { doc().next(); });
+                if (!cached_evaluation().is_null())
+                    throw std::runtime_error("Old result leaked into a new position");
+                for (int wait = 0; wait < 250 && cached_evaluation().is_null(); ++wait) {
+                    co_await winrt::resume_after(std::chrono::milliseconds(40));
+                    co_await ui;
+                }
+                if (cached_evaluation().is_null())
+                    throw std::runtime_error("Live analysis did not follow navigation");
+                analysisSwitch.IsOn(false);
+                co_await winrt::resume_after(std::chrono::milliseconds(200));
+                co_await ui;
+                navigate([this, origin] { doc().select(origin); });
+                if (doc().node(origin).at("meta") != originalMeta || doc().modified() != cleanBefore)
+                    throw std::runtime_error("Live navigation modified the document");
+            }
             xqn::save_atomic(directory / L"result.json", bytes(xqn::Json{{"passed", true},
                                                                          {"kind", "layout-preview"},
                                                                          {"fixedBoard", true},
+                                                                         {"livePikafish", liveChecked},
+                                                                         {"transientAnalysis", liveChecked},
                                                                          {"boardWidth", fixedBoardWidth},
                                                                          {"boardHeight", fixedBoardHeight},
                                                                          {"captures", captures}}
@@ -1019,58 +1218,6 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         }
         allow_close = true;
         window.Close();
-    }
-
-    void analyze() {
-        if (analyzing)
-            throw std::runtime_error("Analysis already running");
-        if (enginePath.empty()) {
-            enginePath = picker(hwnd, false, L"*.exe", L"exe");
-            if (enginePath.empty())
-                return;
-        }
-        if (!engine)
-            engine = std::make_shared<xqn::UciEngine>(enginePath);
-        auto service = engine;
-        auto weak = weak_from_this();
-        auto queue = window.DispatcherQueue();
-        auto fen = doc().node(doc().current()).at("fen").get<std::string>();
-        auto node = doc().current();
-        auto revision = ++generation;
-        auto index = active;
-        int limit = static_cast<int>(depth.Value());
-        analyzing = true;
-        analyzeButton.IsEnabled(false);
-        status.Text(L"皮卡鱼正在分析…");
-        std::thread([weak, queue, service, fen, node, revision, index, limit] {
-            xqn::Json result;
-            std::string error;
-            try {
-                result = xqn::red_view(service->analyze(fen, limit), fen);
-            } catch (const std::exception &e) {
-                error = e.what();
-            }
-            queue.TryEnqueue([weak, result, error, node, revision, index] {
-                if (auto self = weak.lock()) {
-                    self->analyzing = false;
-                    self->analyzeButton.IsEnabled(true);
-                    if (self->generation != revision || self->active != index ||
-                        self->doc().current() != node) {
-                        self->status.Text(L"分析已停止");
-                        return;
-                    }
-                    self->run([&] {
-                        if (!error.empty()) {
-                            self->engine.reset();
-                            throw std::runtime_error(error);
-                        }
-                        self->commit_comment();
-                        self->doc().set_evaluation(result);
-                        self->refresh();
-                    });
-                }
-            });
-        }).detach();
     }
 };
 

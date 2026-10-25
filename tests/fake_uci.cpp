@@ -1,9 +1,19 @@
+#include <cstdlib>
 #include <iostream>
 #include <string>
 int main() {
-    std::string line;
+    std::string line, fen;
     while (std::getline(std::cin, line)) {
-        if (line == "uci")
+        if (line == "uci" && std::getenv("XQN_TEST_STALL_HANDSHAKE"))
+            continue;
+        if (line.starts_with("position fen "))
+            fen = line.substr(13);
+        else if (line == "go infinite") {
+            bool black = fen.find(" b") != std::string::npos;
+            std::cout << "info depth 9 score cp " << (black ? 84 : 42) << " pv " << (black ? "h7e7" : "h2e2")
+                      << "\n"
+                      << std::flush;
+        } else if (line == "uci")
             std::cout << "id name Native test engine\nuciok\n" << std::flush;
         else if (line == "isready")
             std::cout << "readyok\n" << std::flush;
