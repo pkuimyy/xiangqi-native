@@ -8,10 +8,10 @@
 
 ## 运行
 
-本次界面更新构建：`build/winui/Release-fetchcontent/XiangqiNative.exe`。标准构建默认输出到 `build/winui/Release/`；旧程序占用 exe 时可使用独立输出目录。复制应用时保留 exe 所在的完整目录，Windows App SDK 运行库和素材随目录部署。当前验证平台为 Windows 11 x64。
+本次界面更新构建：`build/winui/Release-selection/XiangqiNative.exe`。标准构建默认输出到 `build/winui/Release/`；旧程序占用 exe 时可使用独立输出目录。复制应用时保留 exe 所在的完整目录，Windows App SDK 运行库和素材随目录部署。当前验证平台为 Windows 11 x64。
 
-- 默认纯色棋盘、可选竹纹棋盘，以及 OXDF-editor 的矢量棋子资源；WinUI 原生按钮、菜单式选择器、文件对话框和文本框。
-- 点击棋子与落点走子；支持棋盘翻转、合法落点、上一着终点细框和 FEN 复制；走子立即更新，没有起点残影或渐隐过渡。
+- 纯色棋盘和 OXDF-editor 的矢量棋子资源；WinUI 原生按钮、菜单式选择器、文件对话框和文本框。
+- 点击棋子后会原地轻微放大，再点击落点走子；支持棋盘翻转、合法落点、上一着终点细框和 FEN 复制；走子立即更新，没有起点残影或渐隐过渡。
 - 紧凑分支树与双列中文着法，节点点击跳转、提升主线、删除分支、撤销/重做。
 - 中文、WXF、ICCS 输入；PGN 多局导入、评语与分析信息保留；单局 OXQ 保存及 PGN 导出。
 - 原生皮卡鱼进程分析、停止分析、最佳着箭头、红方视角分数和评估条。
@@ -34,14 +34,14 @@
 ./scripts/build.ps1 -Configuration Debug -CoreOnly
 ```
 
-构建会运行 C++ 文档、引擎和旧实现对照测试。自测会启动实际 WinUI 应用，验证按钮走子、OXQ 保存往返、纯色/竹纹切换及翻转渲染，输出位于 `build/winui/Release/smoke/`。
+构建会运行 C++ 文档、引擎和旧实现对照测试。自测会启动实际 WinUI 应用，验证按钮走子、OXQ 保存往返、棋子选择、取消选择、走子及翻转渲染，输出位于 `build/winui/Release/smoke/`。
 
 
 独立目录构建和验证（适合旧版仍在运行时）：
 
 ```powershell
-./scripts/build.ps1 -Configuration Release -OutputDirectory build/winui/Release-fetchcontent
-./scripts/smoke.ps1 -Configuration Release -OutputDirectory build/winui/Release-fetchcontent
+./scripts/build.ps1 -Configuration Release -OutputDirectory build/winui/Release-selection
+./scripts/smoke.ps1 -Configuration Release -OutputDirectory build/winui/Release-selection
 ```
 
 旧实现对照包含 600 个对局局面、23,063 个合法走法、8 个残局/重子局面、25 组 PGN 输入及 232 节点复杂分支布局。它们是迁移前保存的 JSON 数据，执行测试不需要旧 JS 实现。

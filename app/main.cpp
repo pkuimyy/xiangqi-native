@@ -111,13 +111,19 @@ void load_piece_art() {
         pieceArt.emplace(piece, source);
     }
 }
-Canvas piece_visual(char c) {
+Canvas piece_visual(char c, bool isSelected = false) {
     // Original 96x96 SVGs have a 58px disc centred at 48,48.
     // Crop only the transparent margin so the unchanged artwork fills a board piece.
     Canvas frame;
     frame.Width(45);
     frame.Height(45);
     frame.IsHitTestVisible(false);
+    // Selection grows only the artwork around its fixed centre, without a fade or outline.
+    frame.RenderTransformOrigin(Windows::Foundation::Point{0.5f, 0.5f});
+    ScaleTransform selectionScale;
+    selectionScale.ScaleX(isSelected ? 1.10 : 1.0);
+    selectionScale.ScaleY(isSelected ? 1.10 : 1.0);
+    frame.RenderTransform(selectionScale);
     RectangleGeometry clip;
     clip.Rect(Windows::Foundation::Rect{0, 0, 45, 45});
     frame.Clip(clip);
@@ -178,7 +184,6 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
     TextBox comment;
     TextBox notation;
     ComboBox games;
-    ComboBox boardTexture;
     Button analyzeButton;
     NumberBox depth;
     HWND hwnd{};
@@ -382,21 +387,7 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         StackPanel leftPanel;
         leftPanel.Spacing(8);
         turn.FontSize(18);
-        StackPanel boardHeader;
-        boardHeader.Orientation(Orientation::Horizontal);
-        boardHeader.Spacing(16);
-        boardHeader.Children().Append(turn);
-        auto texture = boardTexture;
-        texture.MinWidth(110);
-        texture.Items().Append(box_value(L"纯色棋盘"));
-        texture.Items().Append(box_value(L"竹纹棋盘"));
-        texture.SelectedIndex(0);
-        texture.SelectionChanged([this](auto &&sender, auto &&) {
-            bamboo = sender.template as<ComboBox>().SelectedIndex() == 1;
-            draw_board();
-        });
-        boardHeader.Children().Append(texture);
-        leftPanel.Children().Append(boardHeader);
+        leftPanel.Children().Append(turn);
         board.ChildrenTransitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
         board.Width(450);
         board.Height(500);
@@ -827,16 +818,12 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             b.BorderThickness(Thickness{0});
             b.HorizontalContentAlignment(HorizontalAlignment::Center);
             b.VerticalContentAlignment(VerticalAlignment::Center);
-            if (s == lastTo) {
+            if (s == lastTo && s != selected) {
                 b.BorderBrush(brush(126, 111, 161));
                 b.BorderThickness(Thickness{1.5});
             }
-            if (s == selected) {
-                b.BorderBrush(brush(38, 124, 113));
-                b.BorderThickness(Thickness{2});
-            }
             if (squares[s])
-                b.Content(piece_visual(squares[s]));
+                b.Content(piece_visual(squares[s], s == selected));
             else if (destinations.contains(s)) {
                 Microsoft::UI::Xaml::Shapes::Ellipse dot;
                 dot.Width(12);
@@ -1121,6 +1108,16 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             co_await ui;
             if (selected != 70)
                 throw std::runtime_error("Board source click failed");
+            co_await capture_preview(directory / L"selected-preview.png");
+            invoke_square(70);
+            co_await winrt::resume_after(std::chrono::milliseconds(30));
+            co_await ui;
+            if (selected != -1)
+                throw std::runtime_error("Board selection did not clear");
+            co_await capture_preview(directory / L"deselected-preview.png");
+            invoke_square(70);
+            co_await winrt::resume_after(std::chrono::milliseconds(30));
+            co_await ui;
             invoke_square(67);
             co_await winrt::resume_after(std::chrono::milliseconds(30));
             co_await ui;
@@ -1142,17 +1139,15 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             if (!failedPieceArt.empty() || loadedPieceArt.size() != 14)
                 throw std::runtime_error("OXDF SVG resources failed to decode");
             co_await capture_preview(directory / L"native-preview.png");
-            boardTexture.SelectedIndex(1);
-            if (!bamboo)
-                throw std::runtime_error("Native texture selector failed");
+            bamboo = true; // Internal rendering check; no public style selector.
             flipped = true;
             draw_board();
             refresh_evaluation_strip();
             co_await winrt::resume_after(std::chrono::milliseconds(300));
             co_await ui;
-            co_await capture_preview(directory / L"bamboo-preview.png");
+            co_await capture_preview(directory / L"internal-bamboo-preview.png");
             flipped = false;
-            boardTexture.SelectedIndex(0);
+            bamboo = false;
             refresh();
 
             xqn::save_atomic(directory / L"result.json",
@@ -1163,7 +1158,9 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                                              {"preview", "native-preview.png"},
                                              {"boardClick", true},
                                              {"pieceResources", loadedPieceArt.size()},
-                                             {"textures", 2}}
+                                             {"visibleBoardStyles", 1},
+                                             {"internalBoardStylesTested", 2},
+                                             {"selectionScale", 1.10}}
                                        .dump(2)));
         } catch (const hresult_error &e) {
             xqn::save_atomic(directory / L"result.json",

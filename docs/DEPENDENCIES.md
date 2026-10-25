@@ -16,7 +16,7 @@ Original application: https://github.com/west-shell/obsidian-xiangqi/tree/c6f219
 
 The 14 assets/pieces/{red,black}_*.svg files are copied byte-for-byte from the user-selected C:\Users\yy_1070\project\OXDF-editor\assets\pieces directory (source repository HEAD 83d0bec at copy time). Their path-based glyphs and artwork are loaded directly by WinUI SvgImageSource. No font substitution or glyph redrawing is used; the native image container only crops transparent outer margins.
 
-The wood image and previous traditional SVG set are removed from source and app outputs. The default board is a flat native brush. board-grid.svg retains the original GRID_SVG paths with a neutral palette and native river labels. Optional bamboo.jpg is copied unchanged and already contains its own grid/river artwork.
+The wood image and previous traditional SVG set are removed from source and app outputs. The default board is a flat native brush. board-grid.svg retains the original GRID_SVG paths with a neutral palette and native river labels. The internal-only bamboo.jpg resource is copied unchanged and already contains its own grid/river artwork. Its renderer is retained for future use, with no user-facing selector.
 
 Pikafish archive: https://github.com/official-pikafish/Pikafish/releases/download/Pikafish-2026-09-06/Pikafish.2026-09-06.7z
 

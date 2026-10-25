@@ -11,7 +11,7 @@ Independent Windows application. The user requires WinUI 3 native controls, C++ 
 - Document owns the authoritative OXQF GameModel; derived FEN/notation/layout are projections.
 - OXQF: FetchContent from https://github.com/pkuimyy/OXQF.git at 206f807f8083ae0ec9384499a35313cb97c7a199, MIT. Link upstream OXQF::format and OXQF::convert. Do not vendor or patch its source.
 - external/json/: nlohmann/json 3.12.0, MIT.
-- assets/: plain native board by default, optional original bamboo board, and user-provided OXDF-editor SVG pieces. Load the original SVG paths through WinUI SvgImageSource; do not redraw glyphs using fonts. Wood resources are intentionally removed.
+- assets/: only a plain native board in the public UI; custom/bamboo rendering stays internal, and user-provided OXDF-editor SVG pieces. Load the original SVG paths through WinUI SvgImageSource; do not redraw glyphs using fonts. Wood resources are intentionally removed.
 - licenses/ and docs/DEPENDENCIES.md: retain source attribution.
 
 ## Validation
@@ -19,12 +19,12 @@ Independent Windows application. The user requires WinUI 3 native controls, C++ 
 Use PowerShell scripts/build.ps1 -Configuration Debug or Release; -CoreOnly skips WinUI.
 Build/smoke scripts accept -OutputDirectory for independent review builds when the existing exe is running. Preserve the running window; do not terminate it to release an output lock.
 CMake generates build/native/winui/<Configuration>/NativeCore.props for the WinUI project. Never hardcode FetchContent header/library cache paths. Dependency BUILD_TESTING is OFF, so no upstream Node tooling is required.
-Board square buttons intentionally use a static native template with empty transitions. Moves update immediately, with only a thin destination outline and no origin fill or fade.
+Board square buttons intentionally use a static native template with empty transitions. Moves update immediately, with only a thin destination outline and no origin fill or fade. Selected piece artwork scales to 110% around its centre with no selection border; suppress the previous-move outline on the selected square. Never expose custom board controls in the user interface.
 All tests are native C++ and run through CTest. Do not introduce Node or JavaScript build steps.
 tests/fixtures/upstream-oracle.json records the original implementation before its removal. Do not rewrite expected output to conceal a regression.
 The legacy checkmate flag means no legal moves, including stalemate. The UI distinguishes the two using check.
 OXQ NodeId is session-local; never use it as a persistent external key.
 Node metadata is a versioned source_note authored org.xiangqi.native/v1; retain unknown annotations.
-Native app --smoke-test verifies button-driven board moves, OXQ save/reopen, texture selection, flip, and native rendering.
+Native app --smoke-test verifies button-driven board moves, OXQ save/reopen, piece selection/cancellation, hidden custom-board rendering, flip, and native rendering.
 Use scripts/smoke.ps1 and scripts/setup-engine.ps1. Keep engine and network licenses.
 Do not claim complete feature parity; record verified work and actual remaining features in docs/PROGRESS.md.

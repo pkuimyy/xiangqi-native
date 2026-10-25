@@ -1,15 +1,15 @@
 # Migration progress
 
-Date: 2026-10-23. The current checkpoint implements the user's C++-only requirement and reuses original graphical resources. Full original-feature parity remains in progress.
+Date: 2026-10-25. The current checkpoint implements the user's C++-only requirement and reuses original graphical resources. Full original-feature parity remains in progress.
 
 ## Implemented
 
 - Independent Git repository and WinUI 3/C++20 application.
 - Native C++ rules/FEN, Chinese/WXF/ICCS notation, PGN/comment metadata and Walker layout.
 - QuickJS, JS/TS sources, generated bundles, npm manifests and Node CI steps removed.
-- Flat native board by default, optional bamboo board, and 14 unchanged OXDF-editor SVG pieces. Wood and old traditional piece assets are removed.
+- Only the flat native board is exposed to users; custom/bamboo rendering stays internal. All 14 OXDF-editor SVG pieces remain unchanged. Wood and old traditional piece assets are removed.
 - Native vector pieces, board click-to-move/flip, legal dots, last-move highlights, annotations and best-move arrows.
-- WinUI native texture selector, side toolbar, FEN copy, evaluation strip, compact branch graph and two-column Chinese move list.
+- WinUI native side toolbar, FEN copy, evaluation strip, compact branch graph and two-column Chinese move list.
 - Multiple games; navigation, branch deletion/promotion, comments, undo/redo.
 - OXQF authoritative model, fetched directly at 206f807 from pkuimyy/OXQF; rich metadata and unknown annotations preserved.
 - PGN import/export; Unicode paths, native file dialogs and atomic OXQ overwrite.
@@ -35,13 +35,19 @@ Release and Debug builds each passed all four CTest targets and actual WinUI smo
 
 ## Latest visual update
 
-The user requested removal of wood artwork and selected OXDF-editor/assets/pieces. All 14 SVGs now load directly through WinUI; their source hashes match. The default board is flat, with bamboo retained as an option. Release and Debug UI builds and smoke tests passed with all 14 SVG decode events confirmed; the four native CTest targets also passed in Release. The review executable is build/winui/Release-fetchcontent/XiangqiNative.exe because the existing Release exe was running. Build/smoke scripts now accept an independent OutputDirectory.
+The user requested removal of wood artwork and selected OXDF-editor/assets/pieces. All 14 SVGs now load directly through WinUI; their source hashes match. The board is flat; the bamboo renderer is now internal only. Release and Debug UI builds and smoke tests passed with all 14 SVG decode events confirmed; the four native CTest targets also passed in Release. The review executable is build/winui/Release-fetchcontent/XiangqiNative.exe because the existing Release exe was running. Build/smoke scripts now accept an independent OutputDirectory.
 
 ## Latest dependency and motion update
 
 The local OXQF source copy is removed. FetchContent now obtains the pinned public repository and uses its original CMake targets. Generated NativeCore.props connects WinUI to the actual headers, libraries and MIT license. Release and Debug each passed all four native CTest targets and actual window smoke tests against the fetched commit. The new reader also successfully loaded a seven-node OXQ saved by the previous application build.
 
 Chess moves now update immediately with a thin destination outline. The previous translucent origin/destination fill and default square-button transitions are removed. The custom native button template retains keyboard focus and click/automation behavior.
+
+## Interface simplification (2026-10-25)
+
+Removed the public board-style ComboBox. Normal application startup always displays the plain board; the custom renderer and bamboo asset remain internal.
+
+Selected piece artwork scales by 10% around its centre, without moving the hit target. The previous selection border is removed, the last-move outline is suppressed on the selected square, and cancelling selection restores its normal size. The native smoke flow captures both states, exercises deselection/reselection and a legal move, then calls the hidden custom renderer directly for coverage. Release build, all four native tests and the UI smoke flow passed. Selected/deselected previews confirm a centred enlargement with no selection outline. The updated executable is build/winui/Release-selection/XiangqiNative.exe.
 
 ## Next work
 
@@ -55,4 +61,4 @@ Chess moves now update immediately with a thin destination outline. The previous
 
 ## Current limits
 
-Full-tree projections run synchronously and undo copies models; large-tree performance is unverified. PGN export is per active game. CBL diagnostics reject input pending a review UI. Theme selection is currently session-only. The current piece set uses the user-selected OXDF-editor SVGs. Competition repetition/chase adjudication is outside the inherited rule implementation.
+Full-tree projections run synchronously and undo copies models; large-tree performance is unverified. PGN export is per active game. CBL diagnostics reject input pending a review UI. Custom board rendering has no public control or persisted setting. The current piece set uses the user-selected OXDF-editor SVGs. Competition repetition/chase adjudication is outside the inherited rule implementation.
