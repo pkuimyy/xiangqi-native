@@ -47,7 +47,11 @@ Chess moves now update immediately with a thin destination outline. The previous
 
 Removed the public board-style ComboBox. Normal application startup always displays the plain board; the custom renderer and bamboo asset remain internal.
 
-Selected piece artwork scales by 10% around its centre, without moving the hit target. The previous selection border is removed, the last-move outline is suppressed on the selected square, and cancelling selection restores its normal size. The native smoke flow captures both states, exercises deselection/reselection and a legal move, then calls the hidden custom renderer directly for coverage. Release build, all four native tests and the UI smoke flow passed. Selected/deselected previews confirm a centred enlargement with no selection outline. The updated executable is build/winui/Release-selection/XiangqiNative.exe.
+Selected piece artwork scales by 10% around its centre, without moving the hit target. The previous selection border is removed, the last-move outline is suppressed on the selected square, and cancelling selection restores its normal size. The native smoke flow captures both states, exercises deselection/reselection and a legal move, then calls the hidden custom renderer directly for coverage. Release build, all four native tests and the UI smoke flow passed. Selected/deselected previews confirm a centred enlargement with no selection outline. The updated executable is build/winui/Release/XiangqiNative.exe.
+
+## Standard Release deployment (2026-10-25)
+
+The current application was rebuilt into build/winui/Release/XiangqiNative.exe using the default build command, without an output-directory override. All four native tests and the window smoke test passed from this exact directory, confirming the plain-only UI and 110% selected-piece scale.
 
 ## Next work
 
