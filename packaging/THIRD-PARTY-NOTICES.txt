@@ -1,0 +1,35 @@
+Third-party notices / 第三方许可说明
+
+Xiangqi Native: GPL-3.0, see LICENSE.
+Source: https://github.com/pkuimyy/xiangqi-native
+Corresponding source is supplied separately; see SOURCE.txt.
+
+Rules and Chinese notation ported from @weshell/xiangqi.js 1.0.3:
+BSD-2-Clause, see licenses/xiangqi.js-LICENSE.
+
+PGN/comment/layout behavior and board geometry:
+obsidian-xiangqi, GPL-3.0.
+https://github.com/west-shell/obsidian-xiangqi/tree/c6f2197
+
+OXQF, MIT:
+https://github.com/pkuimyy/OXQF/tree/206f807f8083ae0ec9384499a35313cb97c7a199
+See licenses/OXQF-MIT.txt.
+
+nlohmann/json 3.12.0, MIT:
+See licenses/nlohmann-json-MIT.txt.
+
+Microsoft Windows App SDK / WinUI runtime:
+WinUI 1.8.260803003 and its locked native dependencies.
+See licenses/WindowsAppSDK-license.txt and licenses/WindowsAppSDK-NOTICE.txt.
+If VC runtime DLLs are included by dependency inspection, they are Microsoft redistributable components:
+https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files
+
+Piece and river SVG artwork is supplied by OXDF-editor:
+https://github.com/pkuimyy/OXDF-editor/tree/83d0bec
+
+Optional bundled Pikafish-2026-09-06:
+GPL-3.0 code, see engines/Copying.txt.
+The NNUE weights have separate conditions, including a commercial-use restriction;
+see engines/NNUE-License.md before redistributing or using them commercially.
+https://github.com/official-pikafish/Pikafish/tree/Pikafish-2026-09-06
+The matching engine source archive is in the separate source package.

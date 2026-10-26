@@ -105,6 +105,16 @@ Live progress is cached by node/FEN and does not modify metadata, dirty state or
 
 The native.engine and new native.live-analysis tests passed, covering stream/stop/reuse, latest-position scores, debounce, errors and cancellation during stalled startup. Actual bundled Pikafish returned live results in WinUI, followed navigation, preserved document metadata/dirty state and exported the current evaluation; the board remained 450x548 on this monitor across five previews. Final centred alignment and all five captures were inspected; updated previews are saved under docs/assets. The exact standard Release executable passed these checks. Full rules/PGN suites remain deferred during UI review.
 
+## Portable release packaging (2026-10-26)
+
+Added scripts/package.ps1 and portable-tools.ps1. The normal-user ZIP contains only manifest-listed WinUI runtime files, the executable/PRI, 14 piece SVGs and two board SVGs, licenses/notices, offline user guidance and (by default) Pikafish/NNUE. Debug symbols, intermediate files, scripts, tests, screenshots, personal settings/documents, unused board-generation inputs and the internal bamboo asset are excluded. Runtime PE imports, including delay loads, are checked; optional VC CRT files are collected only if imported.
+
+A portable.flag marker selects application-local Data/settings.json. Internal engine paths are stored relatively with Windows case-insensitive prefix handling; development output without the marker retains its existing profile behavior. Command-line flags are parsed as actual arguments. A dedicated isolated portable self-check validates app-local WinUI, 14 resources, bundled analysis and settings restoration without altering the host profile.
+
+The default packaging command was exercised under Windows PowerShell 5.1: Release built with full tests skipped, then the ZIP was extracted into two Chinese/spaced paths and launched with an unrelated working directory. Copying only Data from the first extraction restored the switch and new-location engine path in the second while the original remained present. The first complete package was about 69.9MiB zipped / 106MiB unpacked with 93 files. The no-engine variant also passed under PowerShell 7 (89 files, about 19.7MiB ZIP). ZIP entries use explicit UTF-8 and standard forward slashes. Complete/source/checksum outputs and inventories are refreshed by the packaging command.
+
+Matching source and SHA-256 files are separate. Source includes the actual unmodified OXQF snapshot and the pinned/hash-checked Pikafish source archive. CI uploads the ZIP/source/checksum artifacts instead of the entire Release directory; headless CI skips interactive verification explicitly. A clean Windows VM test remains outstanding.
+
 ## Next work
 
 1. Drag/drop moves, arrow/highlight editing, annotation toggles, result controls, branch folding and keyboard interaction coverage.

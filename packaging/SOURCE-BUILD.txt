@@ -1,0 +1,25 @@
+Corresponding source / 源码包构建说明
+
+This archive contains the tracked application source, original licenses, the actual
+OXQF source used by CMake, and (when the binary includes Pikafish) its matching
+official source tarball. NNUE weights are in the binary portable package.
+
+Requirements: Windows 11 x64, Visual Studio C++ desktop tools (v143 or v145),
+Windows SDK 10.0.26100.0, CMake 3.28+, Ninja, Git, and PowerShell.
+NuGet restore needs internet access for the locked Windows SDK/WinUI packages.
+No Node.js or Obsidian is required.
+
+From this source root:
+  .\scripts\build.ps1 -Configuration Release -OxqfSourceDirectory .\third_party\OXQF
+
+The default developer checkout still uses FetchContent directly from pinned OXQF.
+-OxqfSourceDirectory uses the unmodified source snapshot shipped here.
+Result: build\winui\Release\XiangqiNative.exe.
+
+For Pikafish, extract third_party\Pikafish-2026-09-06-source.tar.gz and follow its
+src\Makefile / README.md. Preserve its COPYING and the separate NNUE license.
+The packaged universal binary and its network match the pinned release identified
+in the app notices. Source archive SHA-256 is checked by scripts\package.ps1.
+
+To package a modified source archive, initialize a Git repository and add the
+intended source files first; the packager collects tracked current contents.

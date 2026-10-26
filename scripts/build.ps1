@@ -1,4 +1,4 @@
-param([ValidateSet('Debug','Release')][string]$Configuration='Debug',[switch]$CoreOnly,[string]$OutputDirectory)
+param([ValidateSet('Debug','Release')][string]$Configuration='Debug',[switch]$CoreOnly,[string]$OutputDirectory,[switch]$SkipTests,[string]$OxqfSourceDirectory)
 $ErrorActionPreference='Stop'
 $repoPath=Split-Path -Parent $PSScriptRoot
 $programFilesX86=[Environment]::GetFolderPath('ProgramFilesX86')
@@ -16,12 +16,17 @@ $ctest=Join-Path (Split-Path $cmake -Parent) 'ctest.exe'
 $ninja=Join-Path $vsRoot 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
 Push-Location $repoPath
 try{
- & $cmake -S . -B build/native -G 'Ninja Multi-Config' "-DCMAKE_MAKE_PROGRAM=$ninja"
+ $configureArgs=@('-S','.','-B','build/native','-G','Ninja Multi-Config',"-DCMAKE_MAKE_PROGRAM=$ninja")
+ if($OxqfSourceDirectory){$configureArgs+=("-DFETCHCONTENT_SOURCE_DIR_OXQF="+[IO.Path]::GetFullPath($OxqfSourceDirectory))}
+ & $cmake @configureArgs
  if($LASTEXITCODE -ne 0){throw 'CMake configure failed'}
- & $cmake --build build/native --config $Configuration --target xiangqi_cli xiangqi_core_tests xiangqi_engine_tests xiangqi_live_tests fake_uci xiangqi_parity_tests xiangqi_rules_tests
+ [string[]]$targets=if($SkipTests){@('xiangqi_core')}else{@('xiangqi_cli','xiangqi_core_tests','xiangqi_engine_tests','xiangqi_live_tests','fake_uci','xiangqi_parity_tests','xiangqi_rules_tests')}
+ & $cmake --build build/native --config $Configuration --target @targets
  if($LASTEXITCODE -ne 0){throw 'Native build failed'}
- & $ctest --test-dir build/native -C $Configuration --output-on-failure
- if($LASTEXITCODE -ne 0){throw 'Native tests failed'}
+ if(-not $SkipTests){
+  & $ctest --test-dir build/native -C $Configuration --output-on-failure
+  if($LASTEXITCODE -ne 0){throw 'Native tests failed'}
+ }
  if(-not $CoreOnly){
   $msbuild=Join-Path $vsRoot 'MSBuild\Current\Bin\MSBuild.exe'
   $buildArgs=@('app/XiangqiNative.vcxproj','/restore','/m','/v:minimal',"/p:Configuration=$Configuration",'/p:Platform=x64','/p:RestoreLockedMode=true')

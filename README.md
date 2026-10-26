@@ -25,6 +25,14 @@ Release 统一输出到 `build/winui/Release/`，可执行文件为 `build/winui
 
 程序自动发现 engines 目录，也可在界面选择已有引擎。操作与试用步骤见 [皮卡鱼使用指南](docs/PIKAFISH_GUIDE.md)。
 
+## 便携版发行
+
+普通用户使用 build/packages 中的 portable ZIP，完整解压后双击 XiangqiNative.exe。包内自带运行库、皮卡鱼、NNUE 和离线使用指南，无需 installer 或开发环境；Data/settings.json 随目录携带。
+
+    .\scripts\package.ps1
+
+默认构建标准 Release 并执行解压迁移验证，完整回归暂不自动运行。已有最新构建可加 -SkipBuild；不带引擎可加 -WithoutEngine。源码与 SHA-256 校验文件单独输出。详见 [打包说明](docs/PORTABLE_RELEASE.md)。
+
 ## 构建与验证
 
 需要 Visual Studio C++ 桌面工具、Windows SDK 10.0.26100.0、CMake 3.28+/Ninja、Git，以及首次获取依赖的网络连接。支持 VS 2022 v143 与当前开发机 VS v145；使用锁定的 Windows App SDK 和 C++/WinRT 包。无需安装 npm。

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>象棋便携版使用指南</title>
+<style>body{font:16px/1.8 "Segoe UI","Microsoft YaHei",sans-serif;max-width:850px;margin:40px auto;padding:0 24px;color:#26313d;background:#fafafa}h1{font-size:28px}h2{font-size:21px;margin-top:32px}code{background:#eceff3;padding:2px 5px;border-radius:4px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:9px;text-align:left}a{color:#235c87}</style>
+<h1>象棋便携版使用指南</h1>
+<p>适用于 Windows 11 x64。将 ZIP 完整解压后，双击 <code>XiangqiNative.exe</code> 即可开始。</p>
+<h2>棋盘与棋谱</h2>
+<ul><li>点击棋子选中，再点击合法落点走子；再次点击选中的棋子可以取消。</li>
+<li>棋盘下方依次为回到开始、上一着、下一着、末着、翻转。旁边输入中文着法或 ICCS 着法，例如“炮二平五”或“H2-E2”，点击“走子”。</li>
+<li>键盘 ← / → 浏览前后着，Home / End 跳到开始或末着；输入框获得焦点时保留文字编辑操作。</li>
+<li>左侧红黑条提示当前行棋方，翻转时位置随之对调。棋盘尺寸保持稳定，小窗口可滚动。</li>
+<li>半屏可切换“着法／图形树”，宽窗口会展开研究区。点击着法或树节点切换局面。</li></ul>
+<h2>打开、注释与保存</h2>
+<p>“文件”菜单提供新建、打开、保存和 PGN 导出。界面目前只管理单局棋谱；多局文件需要先拆分。新建和打开前会处理未保存内容。</p>
+<p>注释区始终可见。“保存注释”更新当前棋谱；持久保存整份棋谱请使用“文件 → 保存”。OXQ 能保留完整的注释与分析信息，PGN 用于交换棋谱。</p>
+<h2>皮卡鱼常驻分析</h2>
+<ol><li>打开“局面分析”面板右侧的开关。</li><li>稍作等待后，评分、深度、中文主变和绿色箭头会自动更新。</li><li>直接走子、浏览前后着或选择分支，引擎会自动跟随；关闭开关停止计算，开关状态会被记住。</li></ol>
+<p>默认发行包包含引擎和 NNUE。若你使用未附带引擎的版本，或要更换引擎，可在顶部“分析 → 选择引擎”中选择 exe，配套 NNUE 应放在引擎同目录。</p>
+<table><tr><th>显示</th><th>含义</th></tr><tr><td>+0.50 / -0.50</td><td>统一按红方视角：正分红方较有利，负分黑方较有利；分数不是胜率。</td></tr><tr><td>深度</td><td>停留在局面时持续加深；当前以单线程后台运行。</td></tr><tr><td>中文主变／绿色箭头</td><td>建议着法及后续变化；引擎不会自动替你走子。</td></tr></table>
+<p>实时结果不会每次刷新都修改棋谱。保存或导出时，当前节点的最新分析才会纳入输出；仅浏览其他节点产生的临时结果不会批量写入。</p>
+<p>若出现“未配置引擎”或错误，请检查 engines 中的 exe 与 NNUE，重新选择引擎或关闭／开启开关。将鼠标放在状态文字上可查看完整提示。</p>
+<h2>携带配置与升级</h2>
+<p>目录中的 <code>portable.flag</code> 启用便携模式。设置保存在应用目录的 <code>Data/settings.json</code>，不会使用开发者的个人配置。内置引擎记录为相对路径。</p>
+<p>复制整个应用文件夹即可携带设置和内置引擎；自行选择的外部引擎也需一并复制。棋谱文件请从你选择的保存位置另行保留。</p>
+<p>升级时先退出程序，把新版本解压到新目录，再复制旧目录的 Data 文件夹。请使用有写入权限的目录，并保留配套 DLL、PRI、WINMD 和资源文件。</p>
+<h2>许可与源码</h2>
+<p>见同目录 LICENSE、THIRD-PARTY-NOTICES.txt、SOURCE.txt 及 licenses、engines 中的原始许可。应用代码、引擎代码、NNUE 权重和微软运行库分别受对应条款约束。</p>
+</html>

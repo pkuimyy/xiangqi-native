@@ -27,9 +27,10 @@
 
 应用会自动发现配套引擎。如需选择其他路径，进入顶部“分析 → 选择引擎”，选择皮卡鱼 exe。请把配套 NNUE 放在 exe 同一目录。更换引擎后，开关开启时会自动重新分析当前局面。
 
-开关状态和所选引擎路径保存在：
+开关状态和所选引擎路径保存在下列位置。便携包内的引擎使用相对路径，移动整个应用目录后仍能工作：
 
-    %LOCALAPPDATA%\XiangqiNative\settings.json
+    便携 ZIP：应用目录\Data\settings.json
+    开发目录（无 portable.flag）：%LOCALAPPDATA%\XiangqiNative\settings.json
 
 当前使用轻量配置：单线程、32MB Hash、较低的进程优先级。线程数、Hash 和多候选主变尚未提供界面设置。
 

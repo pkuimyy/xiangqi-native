@@ -1,5 +1,7 @@
 #include <shobjidl.h>
 #include <windows.h>
+
+#include <shellapi.h>
 #undef GetCurrentTime
 #include "board_view.hpp"
 #include "workspace_layout.hpp"
@@ -11,6 +13,7 @@
 #include <map>
 #include <microsoft.ui.xaml.window.h>
 #include <sstream>
+#include <string_view>
 #include <thread>
 #include <unordered_set>
 #include <winrt/Microsoft.UI.Dispatching.h>
@@ -50,6 +53,18 @@ using namespace Microsoft::UI::Xaml::Media;
 using namespace Microsoft::UI::Xaml::Shapes;
 using Windows::UI::Color;
 namespace {
+bool has_argument(std::wstring_view flag) {
+    int count = 0;
+    auto arguments = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (!arguments)
+        return false;
+    bool found = false;
+    for (int i = 1; i < count; ++i)
+        if (std::wstring_view(arguments[i]) == flag)
+            found = true;
+    LocalFree(arguments);
+    return found;
+}
 SolidColorBrush brush(unsigned r, unsigned g, unsigned b) {
     return SolidColorBrush(
         Color{255, static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
@@ -347,10 +362,10 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
                 auto file = picker(hwnd, false, L"*.exe", L"exe");
                 if (!file.empty()) {
                     enginePath = file;
-                    save_preferences();
                     cancel();
                     refresh_analysis();
                     status.Text(L"已选择：" + file.filename().wstring());
+                    save_preferences();
                 }
                 break;
             }
@@ -370,7 +385,11 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             }
         });
     }
+    std::filesystem::path application_directory() { return asset_root().parent_path(); }
     std::filesystem::path preferences_path() {
+        auto directoryRoot = application_directory();
+        if (std::filesystem::is_regular_file(directoryRoot / L"portable.flag"))
+            return directoryRoot / L"Data/settings.json";
         wchar_t directory[32768]{};
         auto length = GetEnvironmentVariableW(L"LOCALAPPDATA", directory, 32768);
         if (!length || length >= 32768)
@@ -387,8 +406,11 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             xqn::Json settings;
             file >> settings;
             auto path = settings.value("enginePath", std::string{});
-            if (!path.empty() && std::filesystem::is_regular_file(std::filesystem::u8path(path)))
-                enginePath = std::filesystem::u8path(path);
+            auto selected = std::filesystem::u8path(path);
+            if (!selected.empty() && selected.is_relative())
+                selected = application_directory() / selected;
+            if (!selected.empty() && std::filesystem::is_regular_file(selected))
+                enginePath = selected;
             analysisSwitch.IsOn(settings.value("liveAnalysis", false));
         } catch (...) {
         }
@@ -411,10 +433,21 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             if (!settings.is_object())
                 settings = xqn::Json::object();
             settings["liveAnalysis"] = analysisSwitch.IsOn();
-            settings["enginePath"] = to_string(enginePath.wstring());
+            auto storedEngine = enginePath;
+            auto directoryRoot =
+                application_directory().lexically_normal().make_preferred().wstring() + L"\\";
+            auto engineFile = enginePath.lexically_normal().make_preferred().wstring();
+            if (std::filesystem::is_regular_file(application_directory() / L"portable.flag") &&
+                engineFile.size() > directoryRoot.size() &&
+                CompareStringOrdinal(engineFile.c_str(), static_cast<int>(directoryRoot.size()),
+                                     directoryRoot.c_str(), static_cast<int>(directoryRoot.size()),
+                                     TRUE) == CSTR_EQUAL)
+                storedEngine = std::filesystem::path(engineFile.substr(directoryRoot.size()));
+            settings["enginePath"] = to_string(storedEngine.generic_wstring());
             std::filesystem::create_directories(path.parent_path());
             xqn::save_atomic(path, bytes(settings.dump(2)));
-        } catch (...) {
+        } catch (const std::exception &error) {
+            status.Text(L"设置保存失败，请将应用放到可写目录：" + to_hstring(error.what()));
         }
     }
     std::string analysis_key() {
@@ -550,9 +583,8 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         window.Title(L"象棋 · Xiangqi Native");
         root.RequestedTheme(ElementTheme::Light);
         board.ChildrenTransitions(Microsoft::UI::Xaml::Media::Animation::TransitionCollection{});
-        auto arguments = std::wstring(GetCommandLineW());
-        automation = arguments.find(L"--layout-preview") != std::wstring::npos ||
-                     arguments.find(L"--smoke-test") != std::wstring::npos;
+        automation = has_argument(L"--layout-preview") || has_argument(L"--smoke-test") ||
+                     has_argument(L"--portable-self-test");
         load_preferences();
         auto weak = weak_from_this();
         auto queue = window.DispatcherQueue();
@@ -563,10 +595,10 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             });
         });
         analysisSwitch.Toggled([this](auto &&, auto &&) {
-            save_preferences();
             cancel();
             refresh_analysis();
             draw_board();
+            save_preferences();
         });
         auto native = window.as<IWindowNative>();
         check_hresult(native->get_WindowHandle(&hwnd));
@@ -624,9 +656,11 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
             }
             e.Handled(true);
         });
-        if (std::wstring(GetCommandLineW()).find(L"--layout-preview") != std::wstring::npos)
+        if (has_argument(L"--portable-self-test"))
+            root.Loaded([this](auto &&, auto &&) { portable_self_test(); });
+        else if (has_argument(L"--layout-preview"))
             root.Loaded([this](auto &&, auto &&) { layout_preview(); });
-        else if (std::wstring(GetCommandLineW()).find(L"--smoke-test") != std::wstring::npos)
+        else if (has_argument(L"--smoke-test"))
             root.Loaded([this](auto &&, auto &&) { smoke_test(); });
         refresh();
         window.Activate();
@@ -937,6 +971,75 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
         peer.GetPattern(Peers::PatternInterface::Invoke).as<Provider::IInvokeProvider>().Invoke();
     }
 
+    fire_and_forget portable_self_test() {
+        auto keep = shared_from_this();
+        winrt::apartment_context ui;
+        auto directory = application_directory();
+        auto report = directory / L"portable-check.json";
+        try {
+            if (!std::filesystem::is_regular_file(directory / L"portable.flag") ||
+                preferences_path() != directory / L"Data/settings.json")
+                throw std::runtime_error("Portable marker or local preference path is missing");
+            for (auto name : {L"Microsoft.ui.xaml.dll", L"Microsoft.WindowsAppRuntime.dll"}) {
+                wchar_t path[32768]{};
+                auto module = GetModuleHandleW(name);
+                if (!module || !GetModuleFileNameW(module, path, 32768) ||
+                    !std::filesystem::equivalent(directory, std::filesystem::path(path).parent_path()))
+                    throw std::runtime_error("WinUI runtime did not load from the portable directory");
+            }
+            bool restored = std::filesystem::is_regular_file(preferences_path());
+            automation = false; // This mode is only run in isolated extracted packages.
+            load_preferences();
+            if (restored && !analysisSwitch.IsOn())
+                throw std::runtime_error("Portable preference was not restored after relocation");
+            auto bundled = directory / L"engines/Pikafish-Windows-x86-64-universal.exe";
+            bool hasEngine = std::filesystem::is_regular_file(bundled);
+            if (hasEngine && !std::filesystem::equivalent(enginePath, bundled))
+                throw std::runtime_error("Engine path points outside the relocated package");
+            auto originalMeta = doc().node(doc().current()).at("meta");
+            bool originalDirty = doc().modified();
+            analysisSwitch.IsOn(true);
+            save_preferences();
+            xqn::Json settings;
+            std::ifstream stored(preferences_path());
+            stored >> settings;
+            auto savedEngine = std::filesystem::u8path(settings.at("enginePath").get<std::string>());
+            if (!settings.at("liveAnalysis").get<bool>() ||
+                (hasEngine && (savedEngine.is_absolute() || savedEngine.empty())))
+                throw std::runtime_error("Portable settings did not preserve a relative engine path");
+            for (int wait = 0;
+                 wait < 250 && (loadedPieceArt.size() != 14 || (hasEngine && cached_evaluation().is_null()));
+                 ++wait) {
+                co_await winrt::resume_after(std::chrono::milliseconds(40));
+                co_await ui;
+            }
+            if (loadedPieceArt.size() != 14 || !failedPieceArt.empty() ||
+                (hasEngine && cached_evaluation().is_null()))
+                throw std::runtime_error("Portable resources or bundled engine failed");
+            if (doc().modified() != originalDirty || doc().node(doc().current()).at("meta") != originalMeta)
+                throw std::runtime_error("Portable analysis changed the document");
+            automation = true;
+            analysisSwitch.IsOn(false); // Stop without changing the preference written above.
+            xqn::save_atomic(report, bytes(xqn::Json{{"passed", true},
+                                                     {"settings", "Data/settings.json"},
+                                                     {"relativeEngine", hasEngine},
+                                                     {"restored", restored},
+                                                     {"appLocalRuntime", true},
+                                                     {"pieceResources", loadedPieceArt.size()},
+                                                     {"liveEngine", hasEngine}}
+                                               .dump(2)));
+        } catch (const hresult_error &error) {
+            xqn::save_atomic(
+                report, bytes(xqn::Json{{"passed", false}, {"error", to_string(error.message())}}.dump(2)));
+        } catch (const std::exception &error) {
+            xqn::save_atomic(report, bytes(xqn::Json{{"passed", false}, {"error", error.what()}}.dump(2)));
+        }
+        automation = true;
+        closing = true;
+        cancel();
+        allow_close = true;
+        window.Close();
+    }
     fire_and_forget layout_preview() {
         winrt::apartment_context ui;
         auto keep = shared_from_this();
@@ -1222,17 +1325,19 @@ struct Workspace : std::enable_shared_from_this<Workspace> {
 };
 
 void startup_error(const hstring &message) {
-    auto arguments = std::wstring(GetCommandLineW());
-    bool preview = arguments.find(L"--layout-preview") != std::wstring::npos;
-    if (!preview && arguments.find(L"--smoke-test") == std::wstring::npos) {
+    bool preview = has_argument(L"--layout-preview");
+    bool portableTest = has_argument(L"--portable-self-test");
+    if (!preview && !portableTest && !has_argument(L"--smoke-test")) {
         MessageBoxW(nullptr, message.c_str(), L"象棋启动失败", MB_ICONERROR);
         return;
     }
     wchar_t module[MAX_PATH]{};
     GetModuleFileNameW(nullptr, module, MAX_PATH);
-    auto folder = std::filesystem::path(module).parent_path() / (preview ? L"layout-preview" : L"smoke");
+    auto folder = std::filesystem::path(module).parent_path();
+    if (!portableTest)
+        folder /= preview ? L"layout-preview" : L"smoke";
     std::filesystem::create_directories(folder);
-    xqn::save_atomic(folder / L"result.json",
+    xqn::save_atomic(folder / (portableTest ? L"portable-check.json" : L"result.json"),
                      bytes(xqn::Json{{"passed", false}, {"startupError", to_string(message)}}.dump(2)));
 }
 
