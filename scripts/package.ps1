@@ -9,6 +9,7 @@ param(
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'portable-tools.ps1')
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $repoPath=[IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $release=Join-Path $repoPath 'build/winui/Release'
